@@ -25,8 +25,7 @@ The tool operates in **two stages**:
 
 ```
 .
-├── config/
-│   └── config.json              # Contains Neo4j connection details
+├── config.js                    # Contains Neo4j connection details
 ├── file-tree-mapper.js          # Script to analyze Perl repo and create JSONs
 ├── tree-to-graph.js             # Script to migrate dependency JSON into Neo4j
 ├── package-lock.json
@@ -40,7 +39,7 @@ The tool operates in **two stages**:
 
 ## ⚙️ Configuration Setup
 
-Before running the scripts, configure your Neo4j connection details in `config/config.json`:
+Before running the scripts, configure your Neo4j connection details in `config.js`:
 
 ```json
 { 
