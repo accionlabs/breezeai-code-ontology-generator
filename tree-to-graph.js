@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const fs = require("fs");
 const neo4j = require("neo4j-driver");
+const { dbConfig } = require("./config")
 
 if (process.argv.length < 3) {
   console.error("Usage: node importToNeo4j.js <repo_json_path>");
@@ -13,13 +14,13 @@ const files = jsonData;
 
 
 const driver = neo4j.driver(
-  "neo4j://localhost:7687",
-  neo4j.auth.basic("neo4j", "12345678")
+  dbConfig.dbUrl,
+  neo4j.auth.basic(dbConfig.username, dbConfig.password)
 );
 
 
 async function importRepo(files) {
-  const session = driver.session({ database: "codeviz" });
+  const session = driver.session({ database: dbConfig.dbName });
   console.log(`📦 Importing ${files.length} files into Neo4j...`);
 
   try {
