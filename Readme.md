@@ -1,13 +1,18 @@
 ## 🧩 Overview
 
-The tool operates in **two stages**:
+The tool operates in **three stages**:
 
-1. **Code Parsing & JSON Generation**  
+1. **Code Parsing & JSON Generation**
    Parses a Perl repository and outputs:
-   - A **package-to-path mapper JSON** — maps each Perl package to its corresponding file path.  
+   - A **package-to-path mapper JSON** — maps each Perl package to its corresponding file path.
    - A **file dependency tree JSON** — captures which files import or depend on others.
 
-2. **Graph Migration to Neo4j**  
+2. **AI-Powered File Descriptions** (Optional)
+   Generates natural language descriptions for each file using various LLM providers:
+   - Supports OpenAI, Claude (Anthropic), Google Gemini, and custom/private LLMs
+   - Adds descriptions to the dependency tree JSON
+
+3. **Graph Migration to Neo4j**
    Reads the generated dependency JSON and imports it into Neo4j, using a configuration file for DB connection.
 
 ---
@@ -25,14 +30,16 @@ The tool operates in **two stages**:
 
 ```
 .
-├── config.js                    # Contains Neo4j connection details
-├── file-tree-mapper.js          # Script to analyze Perl repo and create JSONs
-├── tree-to-graph.js             # Script to migrate dependency JSON into Neo4j
+├── config.js                         # Contains Neo4j connection details
+├── file-tree-mapper.js               # Script to analyze Perl repo and create JSONs
+├── generate-file-descriptions.js     # Script to add AI-generated descriptions
+├── tree-to-graph.js                  # Script to migrate dependency JSON into Neo4j
 ├── package-lock.json
 ├── README.md
 └── output/
     ├── package-path-mapper.json
-    └── file-dependency-tree.json
+    ├── file-dependency-tree.json
+    └── file-dependency-tree-with-descriptions.json
 ```
 
 ---
@@ -83,7 +90,74 @@ This will:
 
 ---
 
-### Step 2: Migrate the Dependency Tree to Neo4j
+### Step 2 (Optional): Generate AI Descriptions for Files
+
+You can enrich your file tree with AI-generated descriptions using various LLM providers. The script scans the repository directly and updates the JSON file in-place:
+
+#### Using OpenAI (GPT-4, GPT-3.5, etc.)
+
+```bash
+node generate-file-descriptions.js <repo-path> <tree-json-file> \
+  --provider openai \
+  --api-key sk-your-openai-key \
+  --model gpt-4o-mini
+```
+
+#### Using Claude (Anthropic)
+
+```bash
+node generate-file-descriptions.js <repo-path> <tree-json-file> \
+  --provider claude \
+  --api-key sk-ant-your-claude-key \
+  --model claude-3-5-sonnet-20241022
+```
+
+#### Using Google Gemini
+
+```bash
+node generate-file-descriptions.js <repo-path> <tree-json-file> \
+  --provider gemini \
+  --api-key your-gemini-key \
+  --model gemini-2.5-flash
+```
+
+#### Using Custom/Private LLM
+
+```bash
+node generate-file-descriptions.js <repo-path> <tree-json-file> \
+  --provider custom \
+  --api-key your-api-key \
+  --api-url http://localhost:8080/v1/chat/completions \
+  --model llama3.2
+```
+
+**Example:**
+```bash
+node generate-file-descriptions.js ./perl-app ./output/file-dependency-tree.json \
+  --provider openai \
+  --api-key sk-xxx \
+  --model gpt-4o-mini
+```
+
+**Available Options:**
+- `--provider`: LLM provider (openai, claude, gemini, custom)
+- `--api-key`: Your API key
+- `--model`: Model name (defaults: gpt-4o-mini, claude-3-5-sonnet-20241022, gemini-2.5-flash)
+- `--api-url`: Custom API endpoint (required for custom provider)
+- `--max-concurrent`: Maximum concurrent API requests (default: 5)
+- `--max-file-size`: Maximum file size in KB to process (default: 500)
+
+This will:
+- Scan the repository for Perl files (.pl and .pm)
+- Load existing JSON file (if it exists) to preserve metadata
+- Generate concise descriptions using the specified LLM
+- Add a `description` field to each file entry
+- Update the JSON file in-place (saves progress after each batch)
+- Skip files that already have descriptions
+
+---
+
+### Step 3: Migrate the Dependency Tree to Neo4j
 
 Once the JSON is generated, run the graph migration command:
 
