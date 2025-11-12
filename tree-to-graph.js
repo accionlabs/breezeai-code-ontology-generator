@@ -38,6 +38,10 @@ async function ensureConstraint() {
 
 async function importRepo(files, projectUuid) {
   if (!files || files.length === 0) return;
+  files = files.map(f => {
+    if(!f.description) f.description = ''
+    return f
+  })
 
   const session = driver.session({ database: dbConfig.dbName });
 
@@ -51,7 +55,10 @@ async function importRepo(files, projectUuid) {
         UNWIND $files AS file
         MERGE (f:File {path: file.path})
         SET f.externalImports = file.externalImports,
-            f.projectUuid = $projectUuid
+            f.projectUuid = $projectUuid,
+            f.name = file.name,
+            f.loc = file.loc,
+            f.description = file.description
         `,
         { files, projectUuid }
       )
@@ -91,6 +98,7 @@ async function importRepo(files, projectUuid) {
     throw err;
   } finally {
     await session.close();
+    process.exit(0)
   }
 }
 

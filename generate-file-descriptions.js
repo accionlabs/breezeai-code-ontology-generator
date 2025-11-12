@@ -370,7 +370,7 @@ async function processFiles(config) {
             skipped++;
             return {
               ...fileInfo,
-              description: `[Skipped: File too large (${Math.round(stats.size / 1024)}KB)]`,
+              // description: `[Skipped: File too large (${Math.round(stats.size / 1024)}KB)]`,
             };
           }
 
@@ -394,7 +394,7 @@ async function processFiles(config) {
           console.error(`❌ Error processing ${relativePath}: ${error.message}`);
           return {
             ...fileInfo,
-            description: `[Error: ${error.message}]`,
+            // description: `[Error: ${error.message}]`,
           };
         }
       })
