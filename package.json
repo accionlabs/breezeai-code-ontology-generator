@@ -7,6 +7,10 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "postinstall": "patch-package && npm rebuild tree-sitter-perl"
   },
+    "bin": {
+    "repo-to-json-tree": "file-tree-mapper.js",
+    "json-tree-to-graph": "tree-to-graph.js"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
