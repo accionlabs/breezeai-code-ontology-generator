@@ -75,8 +75,8 @@ try {
   }
 
   if (language === "javascript") {
-    // JS script expects: <repoPath> <mapperOutput> <importsOutput>
-    command = `node "${scriptPath}" "${repoPath}" "${mapperOutput}" "${importsOutput}"`;
+    // JS script expects: <repoPath> <importsOutput>
+    command = `node "${scriptPath}" "${repoPath}" "${importsOutput}"`;
   }
 
   console.log("🚀 Running command:");
