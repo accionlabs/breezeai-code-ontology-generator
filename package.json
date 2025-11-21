@@ -7,8 +7,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "postinstall": "node install-safe.js"
   },
-    "bin": {
-    "repo-to-json-tree": "./test-script.js"
+  "bin": {
+    "repo-to-json-tree": "./main-tree-mapper.js"
   },
   "keywords": [],
   "author": "",
