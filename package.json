@@ -8,8 +8,7 @@
     "postinstall": "patch-package && npm rebuild tree-sitter-perl"
   },
     "bin": {
-    "repo-to-json-tree": "main-tree-mapper.js",
-    "json-tree-to-graph": "tree-to-graph.js"
+    "repo-to-json-tree": "./main-tree-mapper.js"
   },
   "keywords": [],
   "author": "",
