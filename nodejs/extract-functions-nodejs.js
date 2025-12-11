@@ -14,7 +14,6 @@ function extractFunctionsWithCalls(filePath, repoPath = null) {
   const functions = [];
 
   traverse(tree.rootNode, (node) => {
-    console.log("Node.type***********", node.type)
     if (
       node.type === "function_declaration" ||
       node.type === "function_expression" ||
@@ -51,7 +50,7 @@ function extractFunctionInfo(node, filePath, repoPath = null) {
     type,
     startLine,
     endLine,
-    definedIn: relativePath,
+    path: relativePath,
     calls
   };
 }
@@ -100,14 +99,14 @@ function extractDirectCalls(funcNode) {
 
     // identifier: foo()
     if (func.type === "identifier") {
-      calls.push({ name: func.text, definedIn: null });
+      calls.push({ name: func.text, path: null });
       return;
     }
 
     // member_expression: obj.foo()
     if (func.type === "member_expression") {
       const prop = func.childForFieldName("property");
-      if (prop) calls.push({ name: prop.text, definedIn: null });
+      if (prop) calls.push({ name: prop.text, path: null });
       return;
     }
   });
@@ -293,13 +292,13 @@ function extractFunctionsFromMultipleFiles(filePaths, repoPath = null) {
       if (importMap && importMap.has(call.name)) {
         const resolvedPath = importMap.get(call.name);
         // Convert to relative path
-        call.definedIn = repoPath ? path.relative(repoPath, resolvedPath) : resolvedPath;
+        call.path = repoPath ? path.relative(repoPath, resolvedPath) : resolvedPath;
       }
       // Otherwise, check if it's defined in the same file
       else if (functionRegistry.has(func.sourceFile) &&
                functionRegistry.get(func.sourceFile).has(call.name)) {
         // Use the relative path from func.definedIn since it's the same file
-        call.definedIn = func.definedIn;
+        call.path = func.path;
       }
       // If not found anywhere, leave as null
     }

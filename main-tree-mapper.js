@@ -50,7 +50,7 @@ const importsOutput = path.join(outputDir, `${language}-imports.json`);
 
 const scriptMap = {
   perl: "file-tree-mapper.js",
-  javascript: "file-tree-mapper-nodejs.js",
+  javascript: "nodejs/file-tree-mapper-nodejs.js",
 };
 
 try {
