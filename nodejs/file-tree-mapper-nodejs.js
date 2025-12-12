@@ -9,7 +9,7 @@ const path = require("path");
 const glob = require("glob");
 const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
-const { extractFunctionsWithCalls } = require("./extract-functions-nodejs");
+const { extractFuncitonAndItsCalls } = require("./extract-functions-nodejs");
 
 if (process.argv.length < 4) {
   console.error(
@@ -95,9 +95,7 @@ function extractImports(filePath) {
 // Step 3: Build mapper
 // -------------------------------------------------------------
 function buildPackageMapper(repoPath) {
-  const jsFiles = glob.sync(`${repoPath}/**/*.js`, {
-    ignore: ["**/node_modules/**", "**/build/**", "**/dist/**"],
-  });
+  const jsFiles = getJsFiles()
 
   const mapper = {};
   for (const file of jsFiles) {
@@ -112,17 +110,22 @@ function buildPackageMapper(repoPath) {
   return mapper;
 }
 
-// -------------------------------------------------------------
-// Step 4: Analyze imports
-// -------------------------------------------------------------
-function analyzeImports(repoPath, mapper) {
-  const jsFiles = glob.sync(`${repoPath}/**/*.js`, {
+function getJsFiles () {
+  return glob.sync(`${repoPath}/**/*.js`, {
   ignore: [
     `${repoPath}/**/node_modules/**`,
     `${repoPath}/**/build/**`,
     `${repoPath}/**/dist/**`
   ],
 });
+}
+
+// -------------------------------------------------------------
+// Step 4: Analyze imports
+// -------------------------------------------------------------
+function analyzeImports(repoPath, mapper) {
+  console.log("strted woring*******************************")
+  const jsFiles = getJsFiles()
 
 
   const results = [];
@@ -162,7 +165,7 @@ function analyzeImports(repoPath, mapper) {
       }
 
       // Extract functions for this file
-      const functions = extractFunctionsWithCalls(file, repoPath);
+      const functions = extractFuncitonAndItsCalls(file, repoPath);
 
       results.push({
         path: path.relative(repoPath, file),

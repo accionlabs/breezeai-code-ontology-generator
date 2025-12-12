@@ -84,35 +84,92 @@ function getFunctionName(node) {
 // Extract DIRECT calls inside function body
 // Ignore callback functions inside argument lists
 // ---------------------------------------------------------
+// function extractDirectCalls(funcNode) {
+//   const calls = [];
+
+//   traverse(funcNode, (node, parent) => {
+//     if (node.type !== "call_expression") return;
+
+//     // Ignore callback: call used as argument of another call
+//     if (parent && parent.type === "arguments") return;
+
+//     const func = node.childForFieldName("function");
+
+//     if (!func) return;
+
+//     // identifier: foo()
+//     if (func.type === "identifier") {
+//       calls.push({ name: func.text, path: null, objectName: null, type: func.type });
+//       return;
+//     }
+
+//     // member_expression: obj.foo()
+//     if (func.type === "member_expression") {
+//       const prop = func.childForFieldName("property");
+//       const objectProp = func.childForFieldName("object")
+//       if (prop) calls.push({ name: prop.text, path: null, objectName: !!objectProp ? objectProp.text : null, type: func.type });
+//       return;
+//     }
+//   });
+
+//   return calls;
+// }
+
 function extractDirectCalls(funcNode) {
   const calls = [];
 
   traverse(funcNode, (node, parent) => {
     if (node.type !== "call_expression") return;
 
-    // Ignore callback: call used as argument of another call
-    if (parent && parent.type === "arguments") return;
+    const fn = node.childForFieldName("function");
+    if (!fn) return;
 
-    const func = node.childForFieldName("function");
-
-    if (!func) return;
-
-    // identifier: foo()
-    if (func.type === "identifier") {
-      calls.push({ name: func.text, path: null });
+    // identifier call: foo()
+    if (fn.type === "identifier") {
+      calls.push({
+        name: fn.text,
+        objectName: null,
+        type: "identifier",
+        path: null
+      });
       return;
     }
 
-    // member_expression: obj.foo()
-    if (func.type === "member_expression") {
-      const prop = func.childForFieldName("property");
-      if (prop) calls.push({ name: prop.text, path: null });
+    // member call: obj.method()
+    if (fn.type === "member_expression") {
+      let objectNode = fn.childForFieldName("object");
+      const propNode   = fn.childForFieldName("property");
+
+      // FIX: unwrap call_expression objects
+      while (objectNode && objectNode.type === "call_expression") {
+        objectNode = objectNode.childForFieldName("function");
+      }
+
+      // FIX: unwrap member_expression chains to root
+      while (objectNode && objectNode.type === "member_expression") {
+        const innerObj = objectNode.childForFieldName("object");
+        if (!innerObj) break;
+        objectNode = innerObj;
+      }
+
+      const finalObjectName = objectNode ? objectNode.text : null;
+
+      calls.push({
+        name: propNode ? propNode.text : null,
+        objectName: finalObjectName,
+        type: "member_expression",
+        path: null
+      });
+
       return;
     }
   });
 
   return calls;
 }
+
+
+
 
 // ---------------------------------------------------------
 function traverse(node, cb, parent = null) {
@@ -225,87 +282,41 @@ function resolveImportPath(importSource, currentFilePath, repoPath) {
 
   // Check if file exists
   if (fs.existsSync(resolvedPath)) {
-    return resolvedPath;
+    return path.relative(repoPath, resolvedPath) 
   }
 
   return null;
 }
 
-// ---------------------------------------------------------
-// Process multiple files and resolve call definitions
-// ---------------------------------------------------------
-function extractFunctionsFromMultipleFiles(filePaths, repoPath = null) {
-  // Step 1: Extract all functions from all files
-  const allFunctions = [];
-  const fileData = new Map(); // filePath -> { functions, imports }
 
-  for (const filePath of filePaths) {
-    try {
+function extractFuncitonAndItsCalls(filePath, repoPath) {
+ try {
       const functions = extractFunctionsWithCalls(filePath, repoPath);
       const imports = extractImports(filePath);
 
-      fileData.set(filePath, { functions, imports });
-      allFunctions.push(...functions.map(f => ({ ...f, sourceFile: filePath })));
+
+      const functionMap = new Map();
+      functions.forEach(func => {
+        functionMap.set(func.name, func.path)
+      })
+      imports.forEach(imp => {
+        imp.imported?.forEach(imported => {
+          const resolvedPath = resolveImportPath(imp.source, filePath, repoPath)
+          functionMap.set(imported, resolvedPath || imp.source)
+        })
+      })
+      functions.forEach(func => {
+        func.calls.forEach(call => {
+          const path = functionMap.get(call.name) || functionMap.get(call.objectName);
+          if(path) call.path = path;
+          delete call.objectName;
+          delete call.type;
+        })
+      })
+      return functions;
     } catch (error) {
-      console.error(`Error processing ${filePath}:`, error.message);
+      console.error(`Error processing ${filePath}:`, error);
     }
-  }
-
-  // Step 2: Build a function registry (filePath -> function names)
-  const functionRegistry = new Map();
-  for (const [filePath, data] of fileData.entries()) {
-    const functionNames = new Set();
-    for (const func of data.functions) {
-      if (func.name) {
-        functionNames.add(func.name);
-      }
-    }
-    functionRegistry.set(filePath, functionNames);
-  }
-
-  // Step 3: Build import map for each file (imported name -> resolved file path)
-  const importMaps = new Map();
-  for (const [filePath, data] of fileData.entries()) {
-    const importMap = new Map(); // function name -> source file path
-
-    for (const imp of data.imports) {
-      const resolvedPath = resolveImportPath(imp.source, filePath, repoPath);
-      if (resolvedPath) {
-        // Map each imported name to the resolved file path
-        for (const importedName of imp.imported) {
-          if (importedName) {
-            importMap.set(importedName, resolvedPath);
-          }
-        }
-      }
-    }
-
-    importMaps.set(filePath, importMap);
-  }
-
-  // Step 4: Resolve call definitions based on imports
-  for (const func of allFunctions) {
-    const importMap = importMaps.get(func.sourceFile);
-
-    for (const call of func.calls) {
-      // First, check if this function is imported from another file
-      if (importMap && importMap.has(call.name)) {
-        const resolvedPath = importMap.get(call.name);
-        // Convert to relative path
-        call.path = repoPath ? path.relative(repoPath, resolvedPath) : resolvedPath;
-      }
-      // Otherwise, check if it's defined in the same file
-      else if (functionRegistry.has(func.sourceFile) &&
-               functionRegistry.get(func.sourceFile).has(call.name)) {
-        // Use the relative path from func.definedIn since it's the same file
-        call.path = func.path;
-      }
-      // If not found anywhere, leave as null
-    }
-  }
-
-  // Remove the temporary sourceFile property
-  return allFunctions.map(({ sourceFile, ...rest }) => rest);
 }
 
-module.exports = { extractFunctionsWithCalls, extractFunctionsFromMultipleFiles, extractImports };
+module.exports = { extractFuncitonAndItsCalls };
