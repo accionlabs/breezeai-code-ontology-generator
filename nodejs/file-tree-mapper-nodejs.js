@@ -14,7 +14,7 @@ const { extractClasses } = require("./extract-classes-nodejs");
 
 if (process.argv.length < 4) {
   console.error(
-    "Usage: node file-tree-mapper-nodejs.js <repoPath> <importsOutput.json>"
+    "Usage: node nodejs/file-tree-mapper-nodejs.js <repoPath> <importsOutput.json>"
   );
   process.exit(1);
 }
@@ -152,15 +152,97 @@ function analyzeImports(repoPath, mapper) {
       const importFiles = [];
       const externalImports = [];
 
+      // Helper function to try resolving a path with different extensions
+      function tryResolveWithExtensions(basePath) {
+        // If already has extension and exists, return it
+        if (path.extname(basePath) && fs.existsSync(basePath)) {
+          return basePath;
+        }
+
+        // Try with different JavaScript extensions
+        const extensions = ['.js', '.jsx', '.mjs', '.cjs', '.json'];
+        for (const ext of extensions) {
+          const pathWithExt = basePath + ext;
+          if (fs.existsSync(pathWithExt)) {
+            return pathWithExt;
+          }
+        }
+
+        // Try as directory with index file
+        if (fs.existsSync(basePath) && fs.statSync(basePath).isDirectory()) {
+          for (const ext of extensions) {
+            const indexPath = path.join(basePath, 'index' + ext);
+            if (fs.existsSync(indexPath)) {
+              return indexPath;
+            }
+          }
+        }
+
+        // If no extension worked, return null
+        return null;
+      }
+
       for (let imp of imports) {
+        let resolvedPath = null;
+        let isResolved = false;
+
+        // Handle relative imports (./file or ../file)
         if (imp.startsWith(".")) {
-          let resolvedPath = path.resolve(path.dirname(file), imp);
-          if (!path.extname(resolvedPath)) resolvedPath += ".js";
-          resolvedPath = path.relative(repoPath, resolvedPath);
-          importFiles.push(resolvedPath);
-        } else if (mapper[imp]) {
-          importFiles.push(mapper[imp]);
-        } else {
+          resolvedPath = path.resolve(path.dirname(file), imp);
+        }
+        // Handle absolute imports (/src/file or /lib/file)
+        else if (imp.startsWith("/")) {
+          resolvedPath = path.join(repoPath, imp);
+        }
+        // Try to resolve as a local module (might be a path alias or local module)
+        else if (!imp.startsWith('@')) {
+          // Check if it's a local file path (not a package name)
+          if (imp.includes('/')) {
+            // Try to resolve relative to repo root
+            resolvedPath = path.join(repoPath, imp);
+          } else if (mapper[imp]) {
+            // Try the mapper for simple package names
+            const mappedPath = path.join(repoPath, mapper[imp]);
+            if (fs.existsSync(mappedPath)) {
+              importFiles.push(mapper[imp]);
+              isResolved = true;
+              continue;
+            }
+          } else {
+            // Could be a local file without path, try common patterns
+            const possiblePaths = [
+              path.join(repoPath, 'src', imp),
+              path.join(repoPath, 'lib', imp),
+              path.join(repoPath, imp)
+            ];
+
+            for (const possiblePath of possiblePaths) {
+              const testPath = tryResolveWithExtensions(possiblePath);
+              if (testPath) {
+                resolvedPath = testPath;
+                break;
+              }
+            }
+          }
+        }
+
+        // If we have a potential path, try to resolve it with extensions
+        if (resolvedPath && !isResolved) {
+          const finalPath = tryResolveWithExtensions(resolvedPath);
+
+          if (finalPath && fs.existsSync(finalPath)) {
+            const relativePath = path.relative(repoPath, finalPath);
+            // Make sure it's within the repo (not outside)
+            if (!relativePath.startsWith('..') && !path.isAbsolute(relativePath)) {
+              importFiles.push(relativePath);
+              isResolved = true;
+              continue;
+            }
+          }
+        }
+
+        // If we couldn't resolve it as a local file, it's an external import
+        if (!isResolved) {
           externalImports.push(imp); // NPM imports
         }
       }

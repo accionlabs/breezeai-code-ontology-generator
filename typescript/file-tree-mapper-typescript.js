@@ -12,7 +12,7 @@ const { extractClasses } = require("./extract-classes-typescript");
 
 if (process.argv.length < 4) {
   console.error(
-    "Usage: node file-tree-mapper-typescript.js <repoPath> <importsOutput.json>"
+    "Usage: node typescript/file-tree-mapper-typescript.js <repoPath> <importsOutput.json>"
   );
   process.exit(1);
 }
@@ -64,23 +64,92 @@ function analyzeFiles() {
       // Resolve imports
       imports.forEach(imp => {
         const importSource = imp.source;
+        let resolvedPath = null;
+        let isResolved = false;
 
+        // Handle relative imports (./file or ../file)
         if (importSource.startsWith(".")) {
-          let resolvedPath = path.resolve(path.dirname(file), importSource);
+          resolvedPath = path.resolve(path.dirname(file), importSource);
+        }
+        // Handle absolute imports (/src/file or /lib/file)
+        else if (importSource.startsWith("/")) {
+          resolvedPath = path.join(repoPath, importSource);
+        }
+        // Try to resolve as a local module (might be a path alias or local module)
+        else if (!importSource.startsWith('@')) {
+          // Check if it's a local file path (not a package name)
+          // Package names typically don't contain "/" or are scoped (@org/package)
+          if (importSource.includes('/')) {
+            // Try to resolve relative to repo root
+            resolvedPath = path.join(repoPath, importSource);
+          } else {
+            // Could be a local file without path, try common patterns
+            const possiblePaths = [
+              path.join(repoPath, 'src', importSource),
+              path.join(repoPath, 'lib', importSource),
+              path.join(repoPath, importSource)
+            ];
 
-          if (!path.extname(resolvedPath)) {
-            if (fs.existsSync(resolvedPath + ".ts")) resolvedPath += ".ts";
-            else if (fs.existsSync(resolvedPath + ".tsx")) resolvedPath += ".tsx";
-            else if (fs.existsSync(resolvedPath + ".js")) resolvedPath += ".js";
+            for (const possiblePath of possiblePaths) {
+              const testPath = tryResolveWithExtensions(possiblePath);
+              if (testPath) {
+                resolvedPath = testPath;
+                break;
+              }
+            }
           }
+        }
 
-          if (fs.existsSync(resolvedPath)) {
-            importFiles.push(path.relative(repoPath, resolvedPath));
+        // If we have a potential path, try to resolve it with extensions
+        if (resolvedPath && !isResolved) {
+          const finalPath = tryResolveWithExtensions(resolvedPath);
+
+          if (finalPath && fs.existsSync(finalPath)) {
+            const relativePath = path.relative(repoPath, finalPath);
+            // Make sure it's within the repo (not outside)
+            if (!relativePath.startsWith('..') && !path.isAbsolute(relativePath)) {
+              importFiles.push(relativePath);
+              isResolved = true;
+              return;
+            }
           }
-        } else {
+        }
+
+        // If we couldn't resolve it as a local file, it's an external import
+        if (!isResolved) {
           externalImports.push(importSource);
         }
       });
+
+      // Helper function to try resolving a path with different extensions
+      function tryResolveWithExtensions(basePath) {
+        // If already has extension and exists, return it
+        if (path.extname(basePath) && fs.existsSync(basePath)) {
+          return basePath;
+        }
+
+        // Try with different extensions
+        const extensions = ['.ts', '.tsx', '.js', '.jsx'];
+        for (const ext of extensions) {
+          const pathWithExt = basePath + ext;
+          if (fs.existsSync(pathWithExt)) {
+            return pathWithExt;
+          }
+        }
+
+        // Try as directory with index file
+        if (fs.existsSync(basePath) && fs.statSync(basePath).isDirectory()) {
+          for (const ext of extensions) {
+            const indexPath = path.join(basePath, 'index' + ext);
+            if (fs.existsSync(indexPath)) {
+              return indexPath;
+            }
+          }
+        }
+
+        // If no extension worked, return null
+        return null;
+      }
 
       // Extract functions and classes
       const functions = extractFunctionsAndCalls(file, repoPath);
