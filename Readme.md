@@ -48,7 +48,7 @@ The tool operates in **three stages**:
 
 ## ⚙️ Prerequisites
 
-- **Node.js v18+**
+- **Node.js v20+**
 - **Neo4j Database** (local or remote)
 - A `config.json` file containing Neo4j credentials
 - Basic understanding of Perl package structure (`.pl` and `.pm` files)

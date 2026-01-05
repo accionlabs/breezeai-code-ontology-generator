@@ -13,10 +13,10 @@
   "bin": {
     "repo-to-json-tree": "./index.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["code-analysis", "ontology", "ast", "code-structure", "tree-sitter"],
+  "author": "Accion Labs",
   "license": "ISC",
-  "description": "",
+  "description": "Analyze codebases and generate JSON ontology with AI-powered descriptions and metadata for JavaScript, TypeScript, Python, Perl, and Java projects",
   "dependencies": {
     "glob": "^11.0.3",
     "minimist": "^1.2.8",
