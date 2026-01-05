@@ -52,6 +52,8 @@ const scriptMap = {
   perl: "file-tree-mapper.js",
   javascript: "nodejs/file-tree-mapper-nodejs.js",
   python: "python/file-tree-mapper-python.js",
+  java: "java/file-tree-main-java.js",
+  typescript: "typescript/file-tree-mapper-typescript.js",
 };
 
 try {
