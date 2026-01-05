@@ -41,7 +41,6 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 - `javascript`
 - `typescript`
 - `python`
-- `perl`
 - `java`
 
 **Example Output:**
@@ -226,41 +225,6 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 
 ---
 
-## Running Scripts Separately
-
-If you prefer to run each step independently (useful for testing or iterative analysis):
-
-### Step 1: Generate Tree Only
-```bash
-npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
-  --language javascript \
-  --repo ./my-app \
-  --out ./output
-```
-
-### Step 2: Add Descriptions (Later)
-```bash
-cd breeze-code-ontology-generator
-node generate-file-descriptions.js \
-  ../my-app \
-  ./output/javascript-imports.json \
-  --provider openai \
-  --api-key sk-xxxxx
-```
-
-### Step 3: Add Metadata (Even Later)
-```bash
-cd breeze-code-ontology-generator
-node add-metadata.js \
-  ./output/javascript-imports.json \
-  ../my-app \
-  --provider openai \
-  --api-key sk-xxxxx \
-  --mode high
-```
-
----
-
 ## Command Reference
 
 ### Main Command: `repo-to-json-tree`
@@ -339,7 +303,6 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 3. **Accuracy vs Cost**: Use `--mode low` for faster/cheaper metadata, `--mode high` for better accuracy
 4. **Incremental Processing**: Scripts save progress incrementally, so you can safely interrupt and resume
 5. **Large Codebases**: Start with `--max-file-size 100` to skip large files
-6. **API Keys**: Keep your API keys secure and never commit them to version control
 
 ---
 
@@ -386,9 +349,3 @@ The generated JSON file contains an array of file objects:
 ]
 ```
 
----
-
-## Support
-
-For issues, questions, or contributions, please visit:
-https://github.com/accionlabs/breeze-code-ontology-generator
