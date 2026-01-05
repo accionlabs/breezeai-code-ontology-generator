@@ -11,9 +11,7 @@
     "postinstall": "node install-safe.js"
   },
   "bin": {
-    "repo-to-json-tree": "./index.js",
-    "generate-descriptions": "./generate-file-descriptions.js",
-    "add-metadata": "./add-metadata.js"
+    "repo-to-json-tree": "./index.js"
   },
   "keywords": [],
   "author": "",
