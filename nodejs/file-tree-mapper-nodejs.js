@@ -278,7 +278,9 @@ function analyzeImports(repoPath, mapper) {
 module.exports = {
   extractImports,
   traverse,
-  getNodeText
+  getNodeText,
+  buildPackageMapper,
+  analyzeImports
 };
 
 // -------------------------------------------------------------

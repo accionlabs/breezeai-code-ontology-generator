@@ -12,9 +12,7 @@ const { extractFunctionsAndCalls, extractImports: extractImportsTS } = require("
 const { extractClasses } = require("./extract-classes-typescript");
 
 // Import JavaScript parsers for .js/.jsx files
-const { extractFuncitonAndItsCalls: extractFunctionsJS } = require("../nodejs/extract-functions-nodejs");
-const { extractClasses: extractClassesJS } = require("../nodejs/extract-classes-nodejs");
-const { extractImports: extractImportsJS } = require("../nodejs/file-tree-mapper-nodejs");
+const { buildPackageMapper: buildPackageMapperJs,analyzeImports: analyzeImportsJs } = require("../nodejs/file-tree-mapper-nodejs");
 const { loadPathAliases, resolveWithAlias } = require("./resolve-path-aliases");
 
 if (process.argv.length < 4) {
@@ -26,6 +24,7 @@ if (process.argv.length < 4) {
 
 const repoPath = path.resolve(process.argv[2]);
 const importsOutput = path.resolve(process.argv[3]);
+const mapperOutput = "mapper.json";   // TEMP FILE
 
 // Load path aliases from tsconfig.json
 const pathAliases = loadPathAliases(repoPath);
@@ -211,141 +210,16 @@ function analyzeTypeScriptFiles() {
 // Analyze JavaScript files (.js, .jsx)
 // -------------------------------------------------------------
 function analyzeJavaScriptFiles() {
-  const jsFiles = getJsFilesOnly();
-  const results = [];
-  const totalFiles = jsFiles.length;
+   const mapperForJs = buildPackageMapperJs(repoPath);
+      fs.writeFileSync(mapperOutput, JSON.stringify(mapperForJs, null, 2));
+      console.log(`🛠️  Temporary mapper saved → ${mapperOutput}`);
 
-  if (totalFiles === 0) {
-    console.log(`\n📊 No JavaScript files found\n`);
-    return results;
-  }
+      const analysis = analyzeImportsJs(repoPath, mapperForJs);
 
-  const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-  let spinnerIndex = 0;
-
-  console.log(`\n📊 JavaScript files to process: ${totalFiles}\n`);
-
-  for (let i = 0; i < jsFiles.length; i++) {
-    const file = jsFiles[i];
-
-    try {
-      const percentage = ((i / totalFiles) * 100).toFixed(1);
-      const spinner = spinnerFrames[spinnerIndex % spinnerFrames.length];
-      const fileName = path.relative(repoPath, file);
-
-      process.stdout.write(`\r${spinner} Processing JS: ${i}/${totalFiles} (${percentage}%) - ${fileName.substring(0, 60).padEnd(60, ' ')}`);
-      spinnerIndex++;
-
-      // Extract imports using nodejs function (returns { imports: [], libPaths: [] })
-      const { imports } = extractImportsJS(file);
-      const importFiles = [];
-      const externalImports = [];
-
-      // Try resolve with extensions helper
-      function tryResolveWithExtensions(basePath) {
-        const extensions = ['.js', '.jsx', '.ts', '.tsx'];
-        for (const ext of extensions) {
-          const testPath = basePath + ext;
-          if (fs.existsSync(testPath)) {
-            return testPath;
-          }
-        }
-        // Also try index files
-        for (const ext of extensions) {
-          const indexPath = path.join(basePath, `index${ext}`);
-          if (fs.existsSync(indexPath)) {
-            return indexPath;
-          }
-        }
-        return null;
-      }
-
-      // Resolve imports (imports is an array of strings from nodejs extractImports)
-      imports.forEach(importSource => {
-        let resolvedPath = null;
-        let isResolved = false;
-
-        // Try path aliases first (if available)
-        if (Object.keys(pathAliases).length > 0) {
-          resolvedPath = resolveWithAlias(importSource, pathAliases, repoPath);
-          if (resolvedPath) {
-            importFiles.push(resolvedPath);
-            isResolved = true;
-            return;
-          }
-        }
-
-        // Handle relative imports (./file or ../file)
-        if (importSource.startsWith(".")) {
-          resolvedPath = path.resolve(path.dirname(file), importSource);
-        }
-        // Handle absolute imports (/src/file or /lib/file)
-        else if (importSource.startsWith("/")) {
-          resolvedPath = path.join(repoPath, importSource);
-        }
-        // Try to resolve as a local module
-        else if (!importSource.startsWith('@')) {
-          if (importSource.includes('/')) {
-            resolvedPath = path.join(repoPath, importSource);
-          } else {
-            const possiblePaths = [
-              path.join(repoPath, 'src', importSource),
-              path.join(repoPath, 'lib', importSource),
-              path.join(repoPath, importSource)
-            ];
-
-            for (const possiblePath of possiblePaths) {
-              const testPath = tryResolveWithExtensions(possiblePath);
-              if (testPath) {
-                resolvedPath = testPath;
-                break;
-              }
-            }
-          }
-        }
-
-        // If we have a potential path, try to resolve it with extensions
-        if (resolvedPath && !isResolved) {
-          const finalPath = tryResolveWithExtensions(resolvedPath);
-
-          if (finalPath && fs.existsSync(finalPath)) {
-            const relativePath = path.relative(repoPath, finalPath);
-            if (!relativePath.startsWith('..') && !path.isAbsolute(relativePath)) {
-              importFiles.push(relativePath);
-              isResolved = true;
-              return;
-            }
-          }
-        }
-
-        // If we couldn't resolve it as a local file, it's an external import
-        if (!isResolved) {
-          externalImports.push(importSource);
-        }
-      });
-
-      // Extract functions and classes using JavaScript parsers
-      const functionsData = extractFunctionsJS(file, repoPath);
-      const classesData = extractClassesJS(file, repoPath);
-
-      const relativePath = path.relative(repoPath, file);
-      results.push({
-        path: relativePath,
-        imports: importFiles.map(imp => ({ source: imp, specifiers: [] })),
-        externalImports,
-        functions: functionsData || [],
-        classes: classesData || []
-      });
-
-    } catch (err) {
-      console.error(`\n❌ Error processing ${file}: ${err.message}`);
-    }
-  }
-
-  process.stdout.write('\r' + ' '.repeat(150) + '\r');
-  console.log(`✅ Completed processing ${totalFiles} JavaScript files\n`);
-
-  return results;
+      // DELETE TEMP FILE
+      fs.unlinkSync(mapperOutput);
+      console.log(`🗑️  Deleted temporary file: ${mapperOutput}`);
+      return analysis;
 }
 
 // -------------------------------------------------------------
