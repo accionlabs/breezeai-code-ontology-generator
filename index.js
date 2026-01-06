@@ -31,7 +31,12 @@ const outputDir = args.out ? path.resolve(args.out) : null;
 if (!language || !repoPath || !outputDir) {
   console.error(
     `Usage:\n` +
-      `repo-to-json-tree --language perl --repo ./path/to/repo --out ./output [options]\n\n` +
+      `repo-to-json-tree --language <lang> --repo ./path/to/repo --out ./output [options]\n\n` +
+      `Supported Languages:\n` +
+      `  javascript          - Parse JavaScript files (.js, .jsx)\n` +
+      `  typescript          - Parse TypeScript AND JavaScript files (.ts, .tsx, .js, .jsx)\n` +
+      `  python              - Parse Python files (.py)\n` +
+      `  java                - Parse Java files (.java)\n\n` +
       `Options:\n` +
       `  --generate-descriptions     Generate AI descriptions for files, classes, and functions\n` +
       `  --add-metadata             Add metadata using LLM analysis\n` +
@@ -69,12 +74,17 @@ const scriptMap = {
   typescript: "typescript/file-tree-mapper-typescript.js",
 };
 
+// Inform user about TypeScript's JavaScript support
+if (language === "typescript") {
+  console.log("\n📝 Note: TypeScript mode will also parse JavaScript files (.js, .jsx)");
+}
+
 try {
   const scriptPath = path.resolve(__dirname, scriptMap[language]);
 
   const command = `node "${scriptPath}" "${repoPath}" "${importsOutput}"`;
 
-  console.log("🚀 Running command:");
+  console.log("\n🚀 Running command:");
   console.log(command);
 
   execSync(command, { stdio: "inherit" });

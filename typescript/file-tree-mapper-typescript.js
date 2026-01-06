@@ -1,14 +1,26 @@
 #!/usr/bin/env node
 /**
- * TypeScript Import Analyzer
+ * TypeScript/JavaScript Import Analyzer
+ * Analyzes both TypeScript (.ts, .tsx) and JavaScript (.js, .jsx) files
  * Usage: node file-tree-mapper-typescript.js <repoPath> <importsOutput.json>
  */
 
 const fs = require("fs");
 const path = require("path");
 const glob = require("glob");
-const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-typescript");
-const { extractClasses } = require("./extract-classes-typescript");
+const { extractFunctionsAndCalls: extractFunctionsTS, extractImports: extractImportsTS } = require("./extract-functions-typescript");
+const { extractClasses: extractClassesTS } = require("./extract-classes-typescript");
+
+// Import JavaScript parsers for .js/.jsx files
+const { extractFuncitonAndItsCalls: extractFunctionsJS } = require("../nodejs/extract-functions-nodejs");
+const { extractClasses: extractClassesJS } = require("../nodejs/extract-classes-nodejs");
+
+const Parser = require("tree-sitter");
+const JavaScript = require("tree-sitter-javascript");
+
+// Initialize JavaScript parser
+const jsParser = new Parser();
+jsParser.setLanguage(JavaScript);
 
 if (process.argv.length < 4) {
   console.error(
@@ -21,10 +33,106 @@ const repoPath = path.resolve(process.argv[2]);
 const importsOutput = path.resolve(process.argv[3]);
 
 // -------------------------------------------------------------
-// Get TypeScript files
+// Helper functions for Tree-sitter traversal (for JS files)
+// -------------------------------------------------------------
+function traverse(node, callback) {
+  callback(node);
+  for (let i = 0; i < node.namedChildCount; i++) {
+    traverse(node.namedChild(i), callback);
+  }
+}
+
+function getNodeText(node, sourceText) {
+  return sourceText.slice(node.startIndex, node.endIndex);
+}
+
+// -------------------------------------------------------------
+// Check if file is JavaScript
+// -------------------------------------------------------------
+function isJavaScriptFile(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return ext === '.js' || ext === '.jsx';
+}
+
+// -------------------------------------------------------------
+// Extract imports from JavaScript files
+// -------------------------------------------------------------
+function extractImportsJS(filePath) {
+  const sourceText = fs.readFileSync(filePath, "utf8").replace(/\0/g, "");
+  if (!sourceText.trim()) return [];
+
+  const tree = jsParser.parse(sourceText);
+  const imports = [];
+
+  traverse(tree.rootNode, (node) => {
+    // ES6 imports
+    if (node.type === "import_statement") {
+      const moduleNode = node.namedChildren.find((n) => n.type === "string");
+      if (moduleNode) {
+        const importPath = getNodeText(moduleNode, sourceText).replace(/['"]/g, "");
+        imports.push({ source: importPath, specifiers: [] });
+      }
+    }
+
+    // require("module")
+    if (node.type === "call_expression") {
+      const funcNode = node.namedChildren[0];
+      const argNode = node.namedChildren[1]?.namedChild(0);
+
+      if (
+        funcNode &&
+        funcNode.type === "identifier" &&
+        getNodeText(funcNode, sourceText) === "require" &&
+        argNode &&
+        argNode.type === "string"
+      ) {
+        const importPath = getNodeText(argNode, sourceText).replace(/['"]/g, "");
+        imports.push({ source: importPath, specifiers: [] });
+      }
+    }
+  });
+
+  return imports;
+}
+
+// -------------------------------------------------------------
+// Unified import extraction (uses appropriate parser)
+// -------------------------------------------------------------
+function extractImports(filePath) {
+  if (isJavaScriptFile(filePath)) {
+    return extractImportsJS(filePath);
+  } else {
+    return extractImportsTS(filePath);
+  }
+}
+
+// -------------------------------------------------------------
+// Unified function extraction (uses appropriate parser)
+// -------------------------------------------------------------
+function extractFunctionsAndCalls(filePath) {
+  if (isJavaScriptFile(filePath)) {
+    return extractFunctionsJS(filePath);
+  } else {
+    return extractFunctionsTS(filePath);
+  }
+}
+
+// -------------------------------------------------------------
+// Unified class extraction (uses appropriate parser)
+// -------------------------------------------------------------
+function extractClasses(filePath) {
+  if (isJavaScriptFile(filePath)) {
+    return extractClassesJS(filePath);
+  } else {
+    return extractClassesTS(filePath);
+  }
+}
+
+// -------------------------------------------------------------
+// Get TypeScript and JavaScript files
 // -------------------------------------------------------------
 function getTsFiles() {
-  return glob.sync(`${repoPath}/**/*.{ts,tsx}`, {
+  return glob.sync(`${repoPath}/**/*.{ts,tsx,js,jsx}`, {
     ignore: [
       `${repoPath}/**/node_modules/**`,
       `${repoPath}/**/build/**`,

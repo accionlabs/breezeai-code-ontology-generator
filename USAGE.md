@@ -38,14 +38,18 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 - Saves the results to `./output/<language>-imports.json`
 
 **Supported Languages:**
-- `javascript`
-- `typescript`
-- `python`
-- `java`
+- `javascript` - Parses `.js` and `.jsx` files only
+- `typescript` - Parses `.ts`, `.tsx`, `.js`, and `.jsx` files (includes JavaScript!)
+- `python` - Parses `.py` files
+- `java` - Parses `.java` files
+
+> **💡 Tip:** Use `--language typescript` for projects that contain both TypeScript and JavaScript files. The TypeScript parser will automatically handle both file types.
 
 **Example Output:**
 ```
 ./output/javascript-imports.json
+or
+./output/typescript-imports.json (includes both TS and JS files)
 ```
 
 ---
@@ -144,7 +148,22 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 
 ## Examples
 
-### Example 1: Analyze a JavaScript Project (Basic)
+### Example 1: TypeScript Project with JavaScript Files
+
+TypeScript projects often contain both `.ts` and `.js` files. Use `--language typescript` to parse both:
+
+```bash
+npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+  --language typescript \
+  --repo ../my-ts-project \
+  --out ./analysis
+```
+
+**Output:** `./analysis/typescript-imports.json` (contains both TypeScript and JavaScript files)
+
+---
+
+### Example 2: Analyze a Pure JavaScript Project
 
 ```bash
 npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
@@ -157,7 +176,7 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 
 ---
 
-### Example 2: Python Project with Descriptions (OpenAI)
+### Example 3: Python Project with Descriptions (OpenAI)
 
 ```bash
 npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
@@ -174,7 +193,7 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 
 ---
 
-### Example 3: TypeScript Project with Full Analysis (Claude)
+### Example 4: TypeScript Project with Full Analysis (Claude)
 
 ```bash
 npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
@@ -193,7 +212,7 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 
 ---
 
-### Example 4: Using Custom/Local LLM
+### Example 5: Using Custom/Local LLM
 
 ```bash
 npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
@@ -209,7 +228,7 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 
 ---
 
-### Example 5: Using Gemini
+### Example 6: Using Gemini
 
 ```bash
 npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \

@@ -1,3 +1,20 @@
+# Breeze Code Ontology Generator
+
+> **📖 For complete usage guide, see [USAGE.md](./USAGE.md)**
+
+## 💡 TypeScript + JavaScript Support
+
+When using `--language typescript`, the tool automatically parses **both TypeScript and JavaScript files** (`.ts`, `.tsx`, `.js`, `.jsx`). This is perfect for TypeScript projects that contain JavaScript files.
+
+```bash
+npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+  --language typescript \
+  --repo ./my-project \
+  --out ./output
+```
+
+---
+
 ## 🧩 Overview
 
 The tool operates in **three stages**:
