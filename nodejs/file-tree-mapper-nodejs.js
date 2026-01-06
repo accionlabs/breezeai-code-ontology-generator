@@ -273,20 +273,31 @@ function analyzeImports(repoPath, mapper) {
 }
 
 // -------------------------------------------------------------
+// EXPORTS (for use in TypeScript file-tree-mapper)
+// -------------------------------------------------------------
+module.exports = {
+  extractImports,
+  traverse,
+  getNodeText
+};
+
+// -------------------------------------------------------------
 // MAIN EXECUTION
 // -------------------------------------------------------------
-(async () => {
-  console.log(`📂 Scanning repo: ${repoPath}`);
+if (require.main === module) {
+  (async () => {
+    console.log(`📂 Scanning repo: ${repoPath}`);
 
-  const mapper = buildPackageMapper(repoPath);
-  fs.writeFileSync(mapperOutput, JSON.stringify(mapper, null, 2));
-  console.log(`🛠️  Temporary mapper saved → ${mapperOutput}`);
+    const mapper = buildPackageMapper(repoPath);
+    fs.writeFileSync(mapperOutput, JSON.stringify(mapper, null, 2));
+    console.log(`🛠️  Temporary mapper saved → ${mapperOutput}`);
 
-  const analysis = analyzeImports(repoPath, mapper);
-  fs.writeFileSync(importsOutput, JSON.stringify(analysis, null, 2));
-  console.log(`✅ Final output written to → ${importsOutput}`);
+    const analysis = analyzeImports(repoPath, mapper);
+    fs.writeFileSync(importsOutput, JSON.stringify(analysis, null, 2));
+    console.log(`✅ Final output written to → ${importsOutput}`);
 
-  // DELETE TEMP FILE
-  fs.unlinkSync(mapperOutput);
-  console.log(`🗑️  Deleted temporary file: ${mapperOutput}`);
-})();
+    // DELETE TEMP FILE
+    fs.unlinkSync(mapperOutput);
+    console.log(`🗑️  Deleted temporary file: ${mapperOutput}`);
+  })();
+}

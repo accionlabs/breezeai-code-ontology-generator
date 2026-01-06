@@ -8,21 +8,14 @@
 const fs = require("fs");
 const path = require("path");
 const glob = require("glob");
-const { extractFunctionsAndCalls: extractFunctionsTS, extractImports: extractImportsTS } = require("./extract-functions-typescript");
-const { extractClasses: extractClassesTS } = require("./extract-classes-typescript");
+const { extractFunctionsAndCalls, extractImports: extractImportsTS } = require("./extract-functions-typescript");
+const { extractClasses } = require("./extract-classes-typescript");
 
 // Import JavaScript parsers for .js/.jsx files
 const { extractFuncitonAndItsCalls: extractFunctionsJS } = require("../nodejs/extract-functions-nodejs");
 const { extractClasses: extractClassesJS } = require("../nodejs/extract-classes-nodejs");
+const { extractImports: extractImportsJS } = require("../nodejs/file-tree-mapper-nodejs");
 const { loadPathAliases, resolveWithAlias } = require("./resolve-path-aliases");
-
-
-const Parser = require("tree-sitter");
-const JavaScript = require("tree-sitter-javascript");
-
-// Initialize JavaScript parser
-const jsParser = new Parser();
-jsParser.setLanguage(JavaScript);
 
 if (process.argv.length < 4) {
   console.error(
@@ -37,108 +30,11 @@ const importsOutput = path.resolve(process.argv[3]);
 // Load path aliases from tsconfig.json
 const pathAliases = loadPathAliases(repoPath);
 
-
 // -------------------------------------------------------------
-// Helper functions for Tree-sitter traversal (for JS files)
+// Get TypeScript files only
 // -------------------------------------------------------------
-function traverse(node, callback) {
-  callback(node);
-  for (let i = 0; i < node.namedChildCount; i++) {
-    traverse(node.namedChild(i), callback);
-  }
-}
-
-function getNodeText(node, sourceText) {
-  return sourceText.slice(node.startIndex, node.endIndex);
-}
-
-// -------------------------------------------------------------
-// Check if file is JavaScript
-// -------------------------------------------------------------
-function isJavaScriptFile(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  return ext === '.js' || ext === '.jsx';
-}
-
-// -------------------------------------------------------------
-// Extract imports from JavaScript files
-// -------------------------------------------------------------
-function extractImportsJS(filePath) {
-  const sourceText = fs.readFileSync(filePath, "utf8").replace(/\0/g, "");
-  if (!sourceText.trim()) return [];
-
-  const tree = jsParser.parse(sourceText);
-  const imports = [];
-
-  traverse(tree.rootNode, (node) => {
-    // ES6 imports
-    if (node.type === "import_statement") {
-      const moduleNode = node.namedChildren.find((n) => n.type === "string");
-      if (moduleNode) {
-        const importPath = getNodeText(moduleNode, sourceText).replace(/['"]/g, "");
-        imports.push({ source: importPath, specifiers: [] });
-      }
-    }
-
-    // require("module")
-    if (node.type === "call_expression") {
-      const funcNode = node.namedChildren[0];
-      const argNode = node.namedChildren[1]?.namedChild(0);
-
-      if (
-        funcNode &&
-        funcNode.type === "identifier" &&
-        getNodeText(funcNode, sourceText) === "require" &&
-        argNode &&
-        argNode.type === "string"
-      ) {
-        const importPath = getNodeText(argNode, sourceText).replace(/['"]/g, "");
-        imports.push({ source: importPath, specifiers: [] });
-      }
-    }
-  });
-
-  return imports;
-}
-
-// -------------------------------------------------------------
-// Unified import extraction (uses appropriate parser)
-// -------------------------------------------------------------
-function extractImports(filePath) {
-  if (isJavaScriptFile(filePath)) {
-    return extractImportsJS(filePath);
-  } else {
-    return extractImportsTS(filePath);
-  }
-}
-
-// -------------------------------------------------------------
-// Unified function extraction (uses appropriate parser)
-// -------------------------------------------------------------
-function extractFunctionsAndCalls(filePath) {
-  if (isJavaScriptFile(filePath)) {
-    return extractFunctionsJS(filePath);
-  } else {
-    return extractFunctionsTS(filePath);
-  }
-}
-
-// -------------------------------------------------------------
-// Unified class extraction (uses appropriate parser)
-// -------------------------------------------------------------
-function extractClasses(filePath) {
-  if (isJavaScriptFile(filePath)) {
-    return extractClassesJS(filePath);
-  } else {
-    return extractClassesTS(filePath);
-  }
-}
-
-// -------------------------------------------------------------
-// Get TypeScript and JavaScript files
-// -------------------------------------------------------------
-function getTsFiles() {
-  return glob.sync(`${repoPath}/**/*.{ts,tsx,js,jsx}`, {
+function getTsFilesOnly() {
+  return glob.sync(`${repoPath}/**/*.{ts,tsx}`, {
     ignore: [
       `${repoPath}/**/node_modules/**`,
       `${repoPath}/**/build/**`,
@@ -148,17 +44,30 @@ function getTsFiles() {
 }
 
 // -------------------------------------------------------------
-// Analyze files with functions and classes
+// Get JavaScript files only
 // -------------------------------------------------------------
-function analyzeFiles() {
-  const tsFiles = getTsFiles();
+function getJsFilesOnly() {
+  return glob.sync(`${repoPath}/**/*.{js,jsx}`, {
+    ignore: [
+      `${repoPath}/**/node_modules/**`,
+      `${repoPath}/**/build/**`,
+      `${repoPath}/**/dist/**`
+    ]
+  });
+}
+
+// -------------------------------------------------------------
+// Analyze TypeScript files (.ts, .tsx)
+// -------------------------------------------------------------
+function analyzeTypeScriptFiles() {
+  const tsFiles = getTsFilesOnly();
   const results = [];
   const totalFiles = tsFiles.length;
 
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let spinnerIndex = 0;
 
-  console.log(`\n📊 Total files to process: ${totalFiles}\n`);
+  console.log(`\n📊 TypeScript files to process: ${totalFiles}\n`);
 
   for (let i = 0; i < tsFiles.length; i++) {
     const file = tsFiles[i];
@@ -168,10 +77,10 @@ function analyzeFiles() {
       const spinner = spinnerFrames[spinnerIndex % spinnerFrames.length];
       const fileName = path.relative(repoPath, file);
 
-      process.stdout.write(`\r${spinner} Processing: ${i}/${totalFiles} (${percentage}%) - ${fileName.substring(0, 60).padEnd(60, ' ')}`);
+      process.stdout.write(`\r${spinner} Processing TS: ${i}/${totalFiles} (${percentage}%) - ${fileName.substring(0, 60).padEnd(60, ' ')}`);
       spinnerIndex++;
 
-      const imports = extractImports(file);
+      const imports = extractImportsTS(file);
       const importFiles = [];
       const externalImports = [];
 
@@ -293,7 +202,148 @@ function analyzeFiles() {
   }
 
   process.stdout.write('\r' + ' '.repeat(150) + '\r');
-  console.log(`✅ Completed processing ${totalFiles} files\n`);
+  console.log(`✅ Completed processing ${totalFiles} TypeScript files\n`);
+
+  return results;
+}
+
+// -------------------------------------------------------------
+// Analyze JavaScript files (.js, .jsx)
+// -------------------------------------------------------------
+function analyzeJavaScriptFiles() {
+  const jsFiles = getJsFilesOnly();
+  const results = [];
+  const totalFiles = jsFiles.length;
+
+  if (totalFiles === 0) {
+    console.log(`\n📊 No JavaScript files found\n`);
+    return results;
+  }
+
+  const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  let spinnerIndex = 0;
+
+  console.log(`\n📊 JavaScript files to process: ${totalFiles}\n`);
+
+  for (let i = 0; i < jsFiles.length; i++) {
+    const file = jsFiles[i];
+
+    try {
+      const percentage = ((i / totalFiles) * 100).toFixed(1);
+      const spinner = spinnerFrames[spinnerIndex % spinnerFrames.length];
+      const fileName = path.relative(repoPath, file);
+
+      process.stdout.write(`\r${spinner} Processing JS: ${i}/${totalFiles} (${percentage}%) - ${fileName.substring(0, 60).padEnd(60, ' ')}`);
+      spinnerIndex++;
+
+      // Extract imports using nodejs function (returns { imports: [], libPaths: [] })
+      const { imports } = extractImportsJS(file);
+      const importFiles = [];
+      const externalImports = [];
+
+      // Try resolve with extensions helper
+      function tryResolveWithExtensions(basePath) {
+        const extensions = ['.js', '.jsx', '.ts', '.tsx'];
+        for (const ext of extensions) {
+          const testPath = basePath + ext;
+          if (fs.existsSync(testPath)) {
+            return testPath;
+          }
+        }
+        // Also try index files
+        for (const ext of extensions) {
+          const indexPath = path.join(basePath, `index${ext}`);
+          if (fs.existsSync(indexPath)) {
+            return indexPath;
+          }
+        }
+        return null;
+      }
+
+      // Resolve imports (imports is an array of strings from nodejs extractImports)
+      imports.forEach(importSource => {
+        let resolvedPath = null;
+        let isResolved = false;
+
+        // Try path aliases first (if available)
+        if (Object.keys(pathAliases).length > 0) {
+          resolvedPath = resolveWithAlias(importSource, pathAliases, repoPath);
+          if (resolvedPath) {
+            importFiles.push(resolvedPath);
+            isResolved = true;
+            return;
+          }
+        }
+
+        // Handle relative imports (./file or ../file)
+        if (importSource.startsWith(".")) {
+          resolvedPath = path.resolve(path.dirname(file), importSource);
+        }
+        // Handle absolute imports (/src/file or /lib/file)
+        else if (importSource.startsWith("/")) {
+          resolvedPath = path.join(repoPath, importSource);
+        }
+        // Try to resolve as a local module
+        else if (!importSource.startsWith('@')) {
+          if (importSource.includes('/')) {
+            resolvedPath = path.join(repoPath, importSource);
+          } else {
+            const possiblePaths = [
+              path.join(repoPath, 'src', importSource),
+              path.join(repoPath, 'lib', importSource),
+              path.join(repoPath, importSource)
+            ];
+
+            for (const possiblePath of possiblePaths) {
+              const testPath = tryResolveWithExtensions(possiblePath);
+              if (testPath) {
+                resolvedPath = testPath;
+                break;
+              }
+            }
+          }
+        }
+
+        // If we have a potential path, try to resolve it with extensions
+        if (resolvedPath && !isResolved) {
+          const finalPath = tryResolveWithExtensions(resolvedPath);
+
+          if (finalPath && fs.existsSync(finalPath)) {
+            const relativePath = path.relative(repoPath, finalPath);
+            if (!relativePath.startsWith('..') && !path.isAbsolute(relativePath)) {
+              importFiles.push(relativePath);
+              isResolved = true;
+              return;
+            }
+          }
+        }
+
+        // If we couldn't resolve it as a local file, it's an external import
+        if (!isResolved) {
+          externalImports.push(importSource);
+        }
+      });
+
+      // Extract functions and classes using JavaScript parsers
+      const functionsData = extractFunctionsJS(file);
+      const classesData = extractClassesJS(file);
+
+      const relativePath = path.relative(repoPath, file);
+      results.push({
+        path: relativePath,
+        imports: importFiles.map(imp => ({ source: imp, specifiers: [] })),
+        externalImports,
+        functions: functionsData || [],
+        classes: classesData || []
+      });
+
+    } catch (err) {
+      console.error(`\n❌ Error processing ${file}: ${err.message}`);
+    }
+  }
+
+  process.stdout.write('\r' + ' '.repeat(150) + '\r');
+  console.log(`✅ Completed processing ${totalFiles} JavaScript files\n`);
 
   return results;
 }
@@ -302,9 +352,23 @@ function analyzeFiles() {
 // MAIN
 // -------------------------------------------------------------
 (() => {
-  console.log(`📂 Scanning TypeScript repo: ${repoPath}`);
+  console.log(`📂 Scanning TypeScript/JavaScript repo: ${repoPath}`);
 
-  const analysis = analyzeFiles();
-  fs.writeFileSync(importsOutput, JSON.stringify(analysis, null, 2));
+  // Analyze TypeScript files
+  const tsResults = analyzeTypeScriptFiles();
+
+  // Analyze JavaScript files
+  const jsResults = analyzeJavaScriptFiles();
+
+  // Merge results
+  const mergedResults = [...tsResults, ...jsResults];
+
+  console.log(`\n📊 Summary:`);
+  console.log(`   TypeScript files: ${tsResults.length}`);
+  console.log(`   JavaScript files: ${jsResults.length}`);
+  console.log(`   Total files: ${mergedResults.length}\n`);
+
+  // Write merged results
+  fs.writeFileSync(importsOutput, JSON.stringify(mergedResults, null, 2));
   console.log(`✅ Final output written → ${importsOutput}`);
 })();
