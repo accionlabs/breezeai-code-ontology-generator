@@ -13,7 +13,13 @@
   "bin": {
     "repo-to-json-tree": "./index.js"
   },
-  "keywords": ["code-analysis", "ontology", "ast", "code-structure", "tree-sitter"],
+  "keywords": [
+    "code-analysis",
+    "ontology",
+    "ast",
+    "code-structure",
+    "tree-sitter"
+  ],
   "author": "Accion Labs",
   "license": "ISC",
   "description": "Analyze codebases and generate JSON ontology with AI-powered descriptions and metadata for JavaScript, TypeScript, Python, Perl, and Java projects",
@@ -26,6 +32,7 @@
     "tree-sitter-perl": "github:tree-sitter-perl/tree-sitter-perl#release",
     "tree-sitter-python": "^0.23.6",
     "tree-sitter-typescript": "^0.23.2",
+    "typescript": "^5.9.3",
     "web-tree-sitter": "^0.25.10"
   },
   "devDependencies": {
