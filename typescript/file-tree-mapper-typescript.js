@@ -325,8 +325,8 @@ function analyzeJavaScriptFiles() {
       });
 
       // Extract functions and classes using JavaScript parsers
-      const functionsData = extractFunctionsJS(file);
-      const classesData = extractClassesJS(file);
+      const functionsData = extractFunctionsJS(file, repoPath);
+      const classesData = extractClassesJS(file, repoPath);
 
       const relativePath = path.relative(repoPath, file);
       results.push({
