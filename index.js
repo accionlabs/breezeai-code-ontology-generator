@@ -19,7 +19,7 @@ const args = minimist(process.argv.slice(2), {
   }
 });
 
-const allowedLanguages = ["perl", "javascript", "python", "java", "typescript"];
+const allowedLanguages = ["perl", "javascript", "python", "java", "typescript", "golang"];
 
 const language = (args.language || "").toLowerCase();
 const repoPath = args.repo ? path.resolve(args.repo) : null;
@@ -36,7 +36,8 @@ if (!language || !repoPath || !outputDir) {
       `  javascript          - Parse JavaScript files (.js, .jsx)\n` +
       `  typescript          - Parse TypeScript AND JavaScript files (.ts, .tsx, .js, .jsx)\n` +
       `  python              - Parse Python files (.py)\n` +
-      `  java                - Parse Java files (.java)\n\n` +
+      `  java                - Parse Java files (.java)\n` +
+      `  golang              - Parse Go files (.go) + proto, yaml, html, dockerfiles\n\n` +
       `Options:\n` +
       `  --generate-descriptions     Generate AI descriptions for files, classes, and functions\n` +
       `  --add-metadata             Add metadata using LLM analysis\n` +
@@ -72,11 +73,17 @@ const scriptMap = {
   python: "python/file-tree-mapper-python.js",
   java: "java/file-tree-main-java.js",
   typescript: "typescript/file-tree-mapper-typescript.js",
+  golang: "golang-analysis/file-tree-mapper-complete.js",
 };
 
 // Inform user about TypeScript's JavaScript support
 if (language === "typescript") {
   console.log("\n📝 Note: TypeScript mode will also parse JavaScript files (.js, .jsx)");
+}
+
+// Inform user about Golang's comprehensive coverage
+if (language === "golang") {
+  console.log("\n📝 Note: Golang mode parses .go, .proto, .yaml, .html, Dockerfile, and go.mod files");
 }
 
 try {

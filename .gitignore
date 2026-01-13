@@ -2,3 +2,6 @@ node_modules/
 
 output/
 .DS_Store
+backup/
+input-projects/
+documents/
