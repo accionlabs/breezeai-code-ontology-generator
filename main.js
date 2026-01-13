@@ -15,6 +15,7 @@ const { analyzeTypeScriptRepo } = require("./typescript/file-tree-mapper-typescr
 const { analyzeJavaScriptRepo } = require("./nodejs/file-tree-mapper-nodejs");
 const { analyzePythonRepo } = require("./python/file-tree-mapper-python");
 const { analyzeJavaRepo } = require("./java/file-tree-main-java");
+const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
 
 const isWindows = process.platform === "win32";
 
@@ -138,7 +139,40 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
   console.log("\n🔄 Merging all language outputs...");
 
   const mergedFiles = [];
+  const configFiles = [];
   const analyzedLanguages = [];
+  let totalFunctions = 0;
+  let totalClasses = 0;
+
+  // Config file statistics and consolidated info
+  const configStats = {
+    totalConfigFiles: 0,
+    byType: {
+      json: 0,
+      yaml: 0,
+      docker: 0,
+      env: 0,
+      xml: 0,
+      ini: 0,
+      toml: 0,
+      python: 0,
+      gradle: 0,
+      other: 0
+    },
+    packageManagers: [],
+    dockerInfo: {
+      hasDockerfile: false,
+      hasDockerCompose: false,
+      services: [],
+      exposedPorts: []
+    },
+    buildTools: [],
+    dependencies: {
+      total: 0,
+      production: 0,
+      development: 0
+    }
+  };
 
   for (const result of languageResults) {
     if (result && result.data) {
@@ -146,18 +180,124 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
 
       // Each language output should have an array of file objects
       if (Array.isArray(result.data)) {
-        // Add language identifier to each file
+        // Add language identifier to each file and count functions/classes
         result.data.forEach(file => {
-          mergedFiles.push({
+          const fileData = {
             ...file,
             language: result.language
-          });
+          };
+
+          // Separate config files from code files
+          if (result.language === "config") {
+            configFiles.push(fileData);
+            configStats.totalConfigFiles++;
+
+            // Count by type
+            if (file.fileType && configStats.byType.hasOwnProperty(file.fileType)) {
+              configStats.byType[file.fileType]++;
+            }
+
+            // Extract package.json info
+            if (file.fileName === "package.json" && file.packageInfo) {
+              configStats.packageManagers.push("npm");
+              if (file.packageInfo.dependencies) {
+                configStats.dependencies.production += file.packageInfo.dependencies.length;
+              }
+              if (file.packageInfo.devDependencies) {
+                configStats.dependencies.development += file.packageInfo.devDependencies.length;
+              }
+              configStats.dependencies.total = configStats.dependencies.production + configStats.dependencies.development;
+            }
+
+            // Extract Docker info
+            if (file.fileType === "docker") {
+              configStats.dockerInfo.hasDockerfile = true;
+              if (file.dockerInfo && file.dockerInfo.exposedPorts) {
+                configStats.dockerInfo.exposedPorts.push(...file.dockerInfo.exposedPorts);
+              }
+            }
+
+            // Extract docker-compose info
+            if (file.fileName && file.fileName.includes("docker-compose")) {
+              configStats.dockerInfo.hasDockerCompose = true;
+              if (file.dockerCompose && file.dockerCompose.services) {
+                configStats.dockerInfo.services.push(...file.dockerCompose.services);
+              }
+              if (file.dockerCompose && file.dockerCompose.exposedPorts) {
+                configStats.dockerInfo.exposedPorts.push(...file.dockerCompose.exposedPorts);
+              }
+            }
+
+            // Extract Maven info
+            if (file.fileName === "pom.xml") {
+              configStats.packageManagers.push("maven");
+              configStats.buildTools.push("maven");
+              if (file.mavenInfo && file.mavenInfo.dependencyCount) {
+                configStats.dependencies.total += file.mavenInfo.dependencyCount;
+              }
+            }
+
+            // Extract TypeScript/JavaScript compiler configs
+            if (file.fileName === "tsconfig.json") {
+              configStats.buildTools.push("typescript");
+            }
+
+            // Extract Python config info
+            if (file.fileType === "python") {
+              if (file.fileName === "requirements.txt" && file.dependencyCount) {
+                configStats.dependencies.total += file.dependencyCount;
+                if (!configStats.packageManagers.includes("pip")) {
+                  configStats.packageManagers.push("pip");
+                }
+              }
+              if (file.fileName === "Pipfile") {
+                if (!configStats.packageManagers.includes("pipenv")) {
+                  configStats.packageManagers.push("pipenv");
+                }
+              }
+              if (file.fileName === "setup.py") {
+                configStats.buildTools.push("setuptools");
+              }
+            }
+
+            // Extract Gradle config info
+            if (file.fileType === "gradle") {
+              if (!configStats.packageManagers.includes("gradle")) {
+                configStats.packageManagers.push("gradle");
+              }
+              if (!configStats.buildTools.includes("gradle")) {
+                configStats.buildTools.push("gradle");
+              }
+              if (file.dependencyCount) {
+                configStats.dependencies.total += file.dependencyCount;
+              }
+            }
+
+          } else {
+            mergedFiles.push(fileData);
+
+            // Count functions in this file
+            if (file.functions && Array.isArray(file.functions)) {
+              totalFunctions += file.functions.length;
+            }
+
+            // Count classes in this file
+            if (file.classes && Array.isArray(file.classes)) {
+              totalClasses += file.classes.length;
+            }
+          }
         });
       } else {
         console.warn(`⚠️  Warning: ${result.name} output is not an array`);
       }
     }
   }
+
+  // Deduplicate arrays
+  configStats.packageManagers = [...new Set(configStats.packageManagers)];
+  configStats.buildTools = [...new Set(configStats.buildTools)];
+  configStats.dockerInfo.services = [...new Set(configStats.dockerInfo.services)];
+  configStats.dockerInfo.exposedPorts = [...new Set(configStats.dockerInfo.exposedPorts)];
 
   // Create the final merged structure
   const mergedOutput = {
@@ -166,20 +306,40 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
       repositoryName: path.basename(repoPath),
       analyzedLanguages,
       totalFiles: mergedFiles.length,
+      totalFunctions,
+      totalClasses,
+      configs: configStats,
       generatedAt: new Date().toISOString(),
       toolVersion: "1.0.0"
     },
-    files: mergedFiles
+    files: mergedFiles,
+    configFiles: configFiles
   };
 
   // Write merged output
-  const mergedOutputPath = path.join(outputDir, "project-analysis.json");
+  const mergedOutputPath = path.join(outputDir, `${path.basename(repoPath)}-project-analysis.json`);
   fs.writeFileSync(mergedOutputPath, JSON.stringify(mergedOutput, null, 2));
 
   console.log(`✅ Merged output created!`);
   console.log(`📄 Output: ${mergedOutputPath}`);
   console.log(`   - Languages: ${analyzedLanguages.join(", ")}`);
-  console.log(`   - Total files: ${mergedFiles.length}`);
+  console.log(`   - Total code files: ${mergedFiles.length}`);
+  console.log(`   - Total config files: ${configStats.totalConfigFiles}`);
+  console.log(`   - Total functions: ${totalFunctions}`);
+  console.log(`   - Total classes: ${totalClasses}`);
+
+  if (configStats.totalConfigFiles > 0) {
+    console.log(`\n📋 Configuration Summary:`);
+    console.log(`   - Package Managers: ${configStats.packageManagers.length > 0 ? configStats.packageManagers.join(", ") : "None"}`);
+    console.log(`   - Build Tools: ${configStats.buildTools.length > 0 ? configStats.buildTools.join(", ") : "None"}`);
+    console.log(`   - Total Dependencies: ${configStats.dependencies.total}`);
+    if (configStats.dockerInfo.hasDockerfile || configStats.dockerInfo.hasDockerCompose) {
+      console.log(`   - Docker: ${configStats.dockerInfo.hasDockerfile ? "Dockerfile" : ""}${configStats.dockerInfo.hasDockerfile && configStats.dockerInfo.hasDockerCompose ? ", " : ""}${configStats.dockerInfo.hasDockerCompose ? "docker-compose" : ""}`);
+      if (configStats.dockerInfo.services.length > 0) {
+        console.log(`   - Docker Services: ${configStats.dockerInfo.services.join(", ")}`);
+      }
+    }
+  }
 
   return mergedOutputPath;
 }
@@ -295,6 +455,20 @@ async function autoDetectAndProcess(repoPath, outputDir, args) {
     if (results.length === 0) {
       console.error("\n❌ No languages were successfully processed");
       return { success: false, error: "No languages were successfully processed" };
+    }
+
+    // Step 2.5: Process config files (always run for all repositories)
+    try {
+      const configData = analyzeConfigRepo(repoPath);
+      if (configData && configData.length > 0) {
+        results.push({
+          language: "config",
+          name: "Configuration Files",
+          data: configData
+        });
+      }
+    } catch (err) {
+      console.warn(`\n⚠️  Config file processing failed: ${err.message}`);
     }
 
     // Step 3: Merge all outputs
