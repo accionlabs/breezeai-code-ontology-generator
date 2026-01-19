@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 /**
  * JavaScript Import Analyzer
- * Usage: node file-tree-mapper-nodejs.js <repoPath> <importsOutput.json>
+ * Can be used as a CLI tool or imported as a module
+ *
+ * CLI Usage: node file-tree-mapper-nodejs.js <repoPath> <importsOutput.json>
+ * Module Usage: const { analyzeJavaScriptRepo } = require('./file-tree-mapper-nodejs'); const data = analyzeJavaScriptRepo(repoPath);
  */
 
 const fs = require("fs");
@@ -11,17 +14,6 @@ const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
 const { extractFuncitonAndItsCalls } = require("./extract-functions-nodejs");
 const { extractClasses } = require("./extract-classes-nodejs");
-
-if (process.argv.length < 4) {
-  console.error(
-    "Usage: node nodejs/file-tree-mapper-nodejs.js <repoPath> <importsOutput.json>"
-  );
-  process.exit(1);
-}
-
-const repoPath = path.resolve(process.argv[2]);
-const mapperOutput = "mapper.json";   // TEMP FILE
-const importsOutput = path.resolve(process.argv[3]);
 
 // -------------------------------------------------------------
 // Initialize parser
@@ -46,7 +38,7 @@ function getNodeText(node, sourceText) {
 // -------------------------------------------------------------
 // Step 1: Extract package names
 // -------------------------------------------------------------
-function extractPackageNames(filePath) {
+function extractPackageNames(filePath, repoPath) {
   const relPath = path.relative(repoPath, filePath);
   const packageName = path.basename(filePath, path.extname(filePath));
   return [packageName, relPath];
@@ -96,12 +88,12 @@ function extractImports(filePath) {
 // Step 3: Build mapper
 // -------------------------------------------------------------
 function buildPackageMapper(repoPath) {
-  const jsFiles = getJsFiles()
+  const jsFiles = getJsFiles(repoPath);
 
   const mapper = {};
   for (const file of jsFiles) {
     try {
-      const [pkgName, relPath] = extractPackageNames(file);
+      const [pkgName, relPath] = extractPackageNames(file, repoPath);
       mapper[pkgName] = relPath;
     } catch (err) {
       console.log("Error analyzing file for mapper:", file);
@@ -111,14 +103,14 @@ function buildPackageMapper(repoPath) {
   return mapper;
 }
 
-function getJsFiles () {
-  return glob.sync(`${repoPath}/**/*.js`, {
-  ignore: [
-    `${repoPath}/**/node_modules/**`,
-    `${repoPath}/**/build/**`,
-    `${repoPath}/**/dist/**`
-  ],
-});
+function getJsFiles(repoPath) {
+  return glob.sync(`${repoPath}/**/*.{js,jsx}`, {
+    ignore: [
+      `${repoPath}/**/node_modules/**`,
+      `${repoPath}/**/build/**`,
+      `${repoPath}/**/dist/**`
+    ],
+  });
 }
 
 // -------------------------------------------------------------
@@ -273,9 +265,25 @@ function analyzeImports(repoPath, mapper) {
 }
 
 // -------------------------------------------------------------
-// EXPORTS (for use in TypeScript file-tree-mapper)
+// Main export function - to be called from main.js
+// -------------------------------------------------------------
+function analyzeJavaScriptRepo(repoPath) {
+  console.log(`📂 Scanning JavaScript repo: ${repoPath}`);
+
+  const mapper = buildPackageMapper(repoPath);
+  const analysis = analyzeImports(repoPath, mapper);
+
+  console.log(`\n📊 Summary:`);
+  console.log(`   JavaScript files: ${analysis.length}`);
+
+  return analysis;
+}
+
+// -------------------------------------------------------------
+// EXPORTS
 // -------------------------------------------------------------
 module.exports = {
+  analyzeJavaScriptRepo,
   extractImports,
   traverse,
   getNodeText,
@@ -284,22 +292,22 @@ module.exports = {
 };
 
 // -------------------------------------------------------------
-// MAIN EXECUTION
+// CLI mode - only run if executed directly (not imported)
 // -------------------------------------------------------------
 if (require.main === module) {
-  (async () => {
-    console.log(`📂 Scanning repo: ${repoPath}`);
+  if (process.argv.length < 4) {
+    console.error(
+      "Usage: node nodejs/file-tree-mapper-nodejs.js <repoPath> <importsOutput.json>"
+    );
+    process.exit(1);
+  }
 
-    const mapper = buildPackageMapper(repoPath);
-    fs.writeFileSync(mapperOutput, JSON.stringify(mapper, null, 2));
-    console.log(`🛠️  Temporary mapper saved → ${mapperOutput}`);
+  const repoPath = path.resolve(process.argv[2]);
+  const importsOutput = path.resolve(process.argv[3]);
 
-    const analysis = analyzeImports(repoPath, mapper);
-    fs.writeFileSync(importsOutput, JSON.stringify(analysis, null, 2));
-    console.log(`✅ Final output written to → ${importsOutput}`);
+  const results = analyzeJavaScriptRepo(repoPath);
 
-    // DELETE TEMP FILE
-    fs.unlinkSync(mapperOutput);
-    console.log(`🗑️  Deleted temporary file: ${mapperOutput}`);
-  })();
+  // Write results to file
+  fs.writeFileSync(importsOutput, JSON.stringify(results, null, 2));
+  console.log(`✅ Final output written → ${importsOutput}`);
 }

@@ -2,16 +2,71 @@
 
 > **📖 For complete usage guide, see [USAGE.md](./USAGE.md)**
 
-## 💡 TypeScript + JavaScript Support
+## ⚡ Quick Start - Auto Language Detection (Recommended)
 
-When using `--language typescript`, the tool automatically parses **both TypeScript and JavaScript files** (`.ts`, `.tsx`, `.js`, `.jsx`). This is perfect for TypeScript projects that contain JavaScript files.
+**NEW**: The tool now automatically detects all languages in your repository!
 
 ```bash
+# Analyze a multi-language repository (auto-detects JavaScript, TypeScript, Python, Java)
+# Simply omit the --language flag to enable auto-detection
+npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+  --repo ./my-project \
+  --out ./output
+
+# With AI descriptions
+npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+  --repo ./my-project \
+  --out ./output \
+  --generate-descriptions \
+  --api-key sk-your-api-key
+```
+
+**What it does:**
+- 🔍 Automatically scans your repository
+- 🌐 Detects all supported languages independently (JavaScript, TypeScript, Python, Java)
+- 📊 Merges all outputs into a single `project-analysis.json` file
+- 🏷️ Adds `projectMetaData` with repository info and analyzed languages
+- 🚀 No need to specify `--language` manually
+- ⚡ Each language is detected and processed independently (TypeScript = `.ts/.tsx`, JavaScript = `.js/.jsx`)
+
+**Output Structure:**
+```json
+{
+  "projectMetaData": {
+    "repositoryPath": "/path/to/repo",
+    "repositoryName": "my-project",
+    "analyzedLanguages": ["typescript", "python"],
+    "totalFiles": 150,
+    "generatedAt": "2025-01-12T10:30:00.000Z",
+    "toolVersion": "1.0.0"
+  },
+  "files": [
+    // All analyzed files from all languages
+  ]
+}
+```
+
+---
+
+## 💡 Manual Language Mode
+
+You can still specify a single language to analyze:
+
+```bash
+# Analyze only TypeScript files (.ts, .tsx)
 npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
   --language typescript \
   --repo ./my-project \
   --out ./output
+
+# Analyze only JavaScript files (.js, .jsx)
+npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+  --language javascript \
+  --repo ./my-project \
+  --out ./output
 ```
+
+**Note:** In manual mode, the TypeScript parser will still process any `.js` files it encounters through imports, but the initial detection only looks for `.ts/.tsx` files.
 
 ---
 

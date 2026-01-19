@@ -13,20 +13,10 @@ const CSharp = require("tree-sitter-c-sharp");
 const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-csharp");
 const { extractClasses } = require("./extract-classes-csharp");
 
-if (process.argv.length < 4) {
-  console.error(
-    "Usage: node csharp/file-tree-mapper-csharp.js <repoPath> <importsOutput.json>"
-  );
-  process.exit(1);
-}
-
-const repoPath = path.resolve(process.argv[2]);
-const importsOutput = path.resolve(process.argv[3]);
-
 // -------------------------------------------------------------
 // Get C# files
 // -------------------------------------------------------------
-function getCSharpFiles() {
+function getCSharpFiles(repoPath) {
   return glob.sync(`${repoPath}/**/*.cs`, {
     ignore: [
       `${repoPath}/**/bin/**`,
@@ -295,8 +285,8 @@ function isCSharpStdLib(namespace) {
 // -------------------------------------------------------------
 // Analyze C# files
 // -------------------------------------------------------------
-function analyzeCSharpFiles() {
-  const csFiles = getCSharpFiles();
+function analyzeCSharpRepo(repoPath) {
+  const csFiles = getCSharpFiles(repoPath);
   const totalFiles = csFiles.length;
 
   console.log(`\n📂 Building class and method index...`);
@@ -418,12 +408,27 @@ function analyzeCSharpFiles() {
 }
 
 // -------------------------------------------------------------
-// MAIN
+// EXPORT FOR MODULE USE
 // -------------------------------------------------------------
-(() => {
+module.exports = { analyzeCSharpRepo };
+
+// -------------------------------------------------------------
+// CLI MODE - only run if executed directly (not imported)
+// -------------------------------------------------------------
+if (require.main === module) {
+  if (process.argv.length < 4) {
+    console.error(
+      "Usage: node csharp/file-tree-mapper-csharp.js <repoPath> <importsOutput.json>"
+    );
+    process.exit(1);
+  }
+
+  const repoPath = path.resolve(process.argv[2]);
+  const importsOutput = path.resolve(process.argv[3]);
+
   console.log(`📂 Scanning C# repo: ${repoPath}`);
 
-  const results = analyzeCSharpFiles();
+  const results = analyzeCSharpRepo(repoPath);
 
   console.log(`\n📊 Summary:`);
   console.log(`   Total C# files: ${results.length}\n`);
@@ -431,4 +436,4 @@ function analyzeCSharpFiles() {
   // Write results
   fs.writeFileSync(importsOutput, JSON.stringify(results, null, 2));
   console.log(`✅ Output written → ${importsOutput}`);
-})();
+}

@@ -64,7 +64,11 @@ function getArg(flag, defaultValue = null) {
 
 // Load output JSON
 console.log(`📂 Loading ${outputPath}...`);
-const data = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+const fullData = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+
+// Support both old format (array) and new format (object with files array)
+const data = Array.isArray(fullData) ? fullData : (fullData.files || []);
+const hasProjectMetaData = !Array.isArray(fullData) && fullData.projectMetaData;
 
 // Metadata schema definitions
 const METADATA_SCHEMA = {
@@ -398,13 +402,19 @@ async function processData() {
 
     // Save progress incrementally
     if ((i + 1) % 10 === 0) {
-      fs.writeFileSync(outputPath, JSON.stringify(data, null, 2));
+      const outputData = hasProjectMetaData
+        ? { ...fullData, files: data }
+        : data;
+      fs.writeFileSync(outputPath, JSON.stringify(outputData, null, 2));
       console.log(`\n💾 Progress saved (${i + 1}/${data.length} files)`);
     }
   }
 
   // Final save
-  fs.writeFileSync(outputPath, JSON.stringify(data, null, 2));
+  const finalOutput = hasProjectMetaData
+    ? { ...fullData, files: data }
+    : data;
+  fs.writeFileSync(outputPath, JSON.stringify(finalOutput, null, 2));
 
   console.log(`\n✅ Complete!`);
   console.log(`   Total nodes processed: ${totalProcessed}`);

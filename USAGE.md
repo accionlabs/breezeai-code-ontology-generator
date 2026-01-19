@@ -20,7 +20,111 @@ Before using this tool, ensure you have the following installed:
 
 ## Quick Start
 
-### Step 1: Generate JSON Tree (Basic Usage)
+### ⚡ Auto Language Detection Mode (Recommended)
+
+**NEW**: The easiest way to analyze your codebase - automatically detects all languages!
+
+Simply omit the `--language` flag to enable auto-detection mode.
+
+```bash
+# Basic usage - auto-detects all languages in your repo
+npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+  --repo ./path/to/your/repo \
+  --out ./output
+
+# With AI-generated descriptions
+npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+  --repo ./path/to/your/repo \
+  --out ./output \
+  --generate-descriptions \
+  --api-key sk-your-openai-key
+
+# With descriptions and metadata
+npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+  --repo ./path/to/your/repo \
+  --out ./output \
+  --generate-descriptions \
+  --add-metadata \
+  --provider openai \
+  --api-key sk-your-api-key
+```
+
+**What this does:**
+- 🔍 Scans your repository for supported file types
+- 🌐 Automatically detects: JavaScript, TypeScript, Python, and Java
+- 📊 Processes each detected language separately
+- 🔄 **Merges all outputs into a single `project-analysis.json` file**
+- 🏷️ Adds `projectMetaData` with repository information
+- 🚀 No need to run the tool multiple times or specify languages manually
+
+**Supported Languages & File Extensions:**
+- **TypeScript**: `.ts`, `.tsx` files only
+- **JavaScript**: `.js`, `.jsx` files only
+- **Python**: `.py` files
+- **Java**: `.java` files
+
+**Note:** Each language is detected and processed independently. If your repository has both TypeScript and JavaScript files, both languages will be detected and included in the merged output.
+
+**Output Structure:**
+
+The auto-detection mode generates a **single merged JSON file** at `./output/project-analysis.json`:
+
+```json
+{
+  "projectMetaData": {
+    "repositoryPath": "/absolute/path/to/repo",
+    "repositoryName": "my-project",
+    "analyzedLanguages": ["typescript", "python", "java"],
+    "totalFiles": 247,
+    "generatedAt": "2025-01-12T10:30:00.000Z",
+    "toolVersion": "1.0.0"
+  },
+  "files": [
+    {
+      "filePath": "src/api/users.ts",
+      "language": "typescript",
+      "classes": [...],
+      "functions": [...],
+      "imports": [...]
+    },
+    {
+      "filePath": "scripts/deploy.py",
+      "language": "python",
+      "classes": [...],
+      "functions": [...],
+      "imports": [...]
+    },
+    {
+      "filePath": "core/Main.java",
+      "language": "java",
+      "classes": [...],
+      "functions": [...],
+      "imports": [...]
+    }
+  ]
+}
+```
+
+**Available Options:**
+```bash
+--repo, -r <path>           Path to repository (required)
+--out, -o <path>            Output directory (required)
+--generate-descriptions     Generate AI descriptions
+--add-metadata             Add metadata using LLM
+--provider <name>          LLM provider (openai, claude, gemini, custom)
+--api-key <key>            API key for LLM
+--model <name>             Model name (optional)
+--api-url <url>            Custom API URL
+--mode <low|high>          Accuracy mode for metadata
+--max-concurrent <num>     Max concurrent API requests
+--verbose                  Show detailed processing info
+```
+
+---
+
+### Step 1: Generate JSON Tree (Manual Language Selection)
+
+If you want to analyze a specific language only, use the manual mode.
 
 This step analyzes your codebase and generates a JSON file containing the structure of your code (files, classes, functions, imports, etc.).
 

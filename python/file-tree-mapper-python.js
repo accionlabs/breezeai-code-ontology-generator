@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 /**
  * Python Import Analyzer
- * Usage: node file-tree-mapper-python.js <repoPath> <importsOutput.json>
+ * Can be used as a CLI tool or imported as a module
+ *
+ * CLI Usage: node file-tree-mapper-python.js <repoPath> <importsOutput.json>
+ * Module Usage: const { analyzePythonRepo } = require('./file-tree-mapper-python'); const data = analyzePythonRepo(repoPath);
  */
 
 const fs = require("fs");
@@ -10,20 +13,10 @@ const glob = require("glob");
 const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-python");
 const { extractClasses } = require("./extract-classes-python");
 
-if (process.argv.length < 4) {
-  console.error(
-    "Usage: node file-tree-mapper-python.js <repoPath> <importsOutput.json>"
-  );
-  process.exit(1);
-}
-
-const repoPath = path.resolve(process.argv[2]);
-const importsOutput = path.resolve(process.argv[3]);
-
 // -------------------------------------------------------------
 // Get Python files
 // -------------------------------------------------------------
-function getPythonFiles() {
+function getPythonFiles(repoPath) {
   return glob.sync(`${repoPath}/**/*.py`, {
     ignore: [
       `${repoPath}/**/venv/**`,
@@ -87,8 +80,8 @@ function resolveImportPath(importSource, currentFilePath, repoPath) {
 // -------------------------------------------------------------
 // Analyze files with functions and classes
 // -------------------------------------------------------------
-function analyzeFiles() {
-  const pyFiles = getPythonFiles();
+function analyzeFiles(repoPath) {
+  const pyFiles = getPythonFiles(repoPath);
   const results = [];
   const totalFiles = pyFiles.length;
 
@@ -152,13 +145,40 @@ function analyzeFiles() {
 }
 
 // -------------------------------------------------------------
-// MAIN
+// Main export function - to be called from main.js
 // -------------------------------------------------------------
-(() => {
+function analyzePythonRepo(repoPath) {
   console.log(`📂 Scanning Python repo: ${repoPath}`);
 
-  const analysis = analyzeFiles();
-  fs.writeFileSync(importsOutput, JSON.stringify(analysis, null, 2));
+  const analysis = analyzeFiles(repoPath);
+
+  console.log(`\n📊 Summary:`);
+  console.log(`   Python files: ${analysis.length}`);
+
+  return analysis;
+}
+
+// Export the main function
+module.exports = { analyzePythonRepo };
+
+// -------------------------------------------------------------
+// CLI mode - only run if executed directly (not imported)
+// -------------------------------------------------------------
+if (require.main === module) {
+  if (process.argv.length < 4) {
+    console.error(
+      "Usage: node python/file-tree-mapper-python.js <repoPath> <importsOutput.json>"
+    );
+    process.exit(1);
+  }
+
+  const repoPath = path.resolve(process.argv[2]);
+  const importsOutput = path.resolve(process.argv[3]);
+
+  const results = analyzePythonRepo(repoPath);
+
+  // Write results to file
+  fs.writeFileSync(importsOutput, JSON.stringify(results, null, 2));
   console.log(`✅ Final output written → ${importsOutput}`);
-})();
+}
 

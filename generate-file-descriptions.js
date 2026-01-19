@@ -356,7 +356,12 @@ async function processFiles(config) {
     process.exit(1);
   }
 
-  const fileTree = JSON.parse(fs.readFileSync(config.treeJsonFile, "utf8"));
+  const fullData = JSON.parse(fs.readFileSync(config.treeJsonFile, "utf8"));
+
+  // Support both old format (array) and new format (object with files array)
+  const fileTree = Array.isArray(fullData) ? fullData : (fullData.files || []);
+  const hasProjectMetaData = !Array.isArray(fullData) && fullData.projectMetaData;
+
   console.log(`Found ${fileTree.length} files in JSON`);
 
   const provider = createProvider(config);
@@ -458,7 +463,10 @@ async function processFiles(config) {
     results.push(...batchResults);
 
     // Save progress after each batch (incremental updates)
-    fs.writeFileSync(config.treeJsonFile, JSON.stringify(results, null, 2));
+    const outputData = hasProjectMetaData
+      ? { ...fullData, files: results }
+      : results;
+    fs.writeFileSync(config.treeJsonFile, JSON.stringify(outputData, null, 2));
     console.log(`💾 Progress saved (${results.length}/${fileTree.length} files)`);
 
     // Small delay between batches to avoid rate limiting

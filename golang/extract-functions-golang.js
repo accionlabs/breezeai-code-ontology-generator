@@ -3,6 +3,26 @@ const Go = require("tree-sitter-go");
 const fs = require("fs");
 const path = require("path");
 
+// -------------------------------------------------------------
+// Helpers for go.mod resolution
+// -------------------------------------------------------------
+function findGoMod(startDir) {
+  let dir = path.resolve(startDir);
+
+  while (dir !== path.dirname(dir)) {
+    const candidate = path.join(dir, "go.mod");
+    if (fs.existsSync(candidate)) return candidate;
+    dir = path.dirname(dir);
+  }
+  return null;
+}
+
+function readModuleName(goModPath) {
+  const content = fs.readFileSync(goModPath, "utf8");
+  const match = content.match(/^module\s+(.+)$/m);
+  return match ? match[1].trim() : null;
+}
+
 function extractFunctionsWithCalls(filePath, repoPath = null) {
   const source = fs.readFileSync(filePath, "utf8");
 
@@ -226,57 +246,77 @@ function extractImports(filePath) {
   return imports;
 }
 
-function resolveImportPath(importSource, currentFilePath, repoPath) {
-  // External package (standard library or third-party)
-  if (!importSource.startsWith(".") && !importSource.startsWith("/")) {
-    return null; // External package
-  }
-
-  // Relative path
-  let resolvedPath = path.resolve(path.dirname(currentFilePath), importSource);
-
-  // Go doesn't typically use file extensions in imports, but files are .go
-  if (!path.extname(resolvedPath)) {
-    // Check if it's a directory (package)
-    if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isDirectory()) {
-      return path.relative(repoPath, resolvedPath);
-    }
-    resolvedPath += ".go";
-  }
-
-  if (fs.existsSync(resolvedPath)) {
-    return path.relative(repoPath, resolvedPath);
-  }
-
-  return null;
-}
-
 function extractFunctionsAndCalls(filePath, repoPath) {
   try {
     const functions = extractFunctionsWithCalls(filePath, repoPath);
     const imports = extractImports(filePath);
 
-    const functionMap = new Map();
+    // Get go.mod info for module-based import resolution
+    const goModPath = findGoMod(path.dirname(filePath));
+    let moduleName = null;
+    let moduleRoot = null;
 
-    // Map local functions
-    functions.forEach(func => {
-      functionMap.set(func.name, path.relative(repoPath, filePath));
+    if (goModPath) {
+      moduleRoot = path.dirname(goModPath);
+      moduleName = readModuleName(goModPath);
+    }
+
+    // Map package names to their resolved file paths
+    const packageToFiles = new Map();
+
+    // Map imports to actual file paths
+    imports.forEach(imp => {
+      const pkgName = imp.alias || path.basename(imp.source);
+      let resolvedFiles = [];
+
+      // Local module import (e.g., github.com/user/project/pkg)
+      if (moduleName && imp.source.startsWith(moduleName)) {
+        const rel = imp.source.slice(moduleName.length);
+        const pkgDir = path.join(moduleRoot, rel);
+
+        if (fs.existsSync(pkgDir) && fs.statSync(pkgDir).isDirectory()) {
+          resolvedFiles = fs.readdirSync(pkgDir)
+            .filter(f => f.endsWith(".go") && !f.endsWith("_test.go"))
+            .map(f => path.relative(repoPath, path.join(pkgDir, f)));
+        }
+      }
+
+      // Relative import (rare in Go)
+      if (resolvedFiles.length === 0 && imp.source.startsWith(".")) {
+        const abs = path.resolve(path.dirname(filePath), imp.source);
+        if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
+          resolvedFiles = fs.readdirSync(abs)
+            .filter(f => f.endsWith(".go") && !f.endsWith("_test.go"))
+            .map(f => path.relative(repoPath, path.join(abs, f)));
+        }
+      }
+
+      if (resolvedFiles.length > 0) {
+        packageToFiles.set(pkgName, resolvedFiles);
+      }
     });
 
-    // Map imports
-    imports.forEach(imp => {
-      const resolvedPath = resolveImportPath(imp.source, filePath, repoPath);
-      const packageName = imp.alias || path.basename(imp.source);
-      functionMap.set(packageName, resolvedPath || imp.source);
+    // Map local functions to current file
+    const localFunctionMap = new Map();
+    functions.forEach(func => {
+      localFunctionMap.set(func.name, path.relative(repoPath, filePath));
     });
 
     // Resolve call paths
     functions.forEach(func => {
       func.calls.forEach(call => {
-        let resolvedPath = functionMap.get(call.name);
+        let resolvedPath = null;
 
-        if (!resolvedPath && call.objectName) {
-          resolvedPath = functionMap.get(call.objectName);
+        // Check if it's a local function call
+        if (!call.objectName) {
+          resolvedPath = localFunctionMap.get(call.name);
+        } else {
+          // It's a package.Function() or receiver.Method() call
+          const pkgFiles = packageToFiles.get(call.objectName);
+          if (pkgFiles && pkgFiles.length > 0) {
+            // Use the first file as representative (or could search for the actual function)
+            resolvedPath = pkgFiles[0];
+          }
         }
 
         if (resolvedPath) {

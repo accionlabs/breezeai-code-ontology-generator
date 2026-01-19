@@ -2,7 +2,10 @@
 /**
  * TypeScript/JavaScript Import Analyzer
  * Analyzes both TypeScript (.ts, .tsx) and JavaScript (.js, .jsx) files
- * Usage: node file-tree-mapper-typescript.js <repoPath> <importsOutput.json>
+ * Can be used as a CLI tool or imported as a module
+ *
+ * CLI Usage: node file-tree-mapper-typescript.js <repoPath> <importsOutput.json>
+ * Module Usage: const { analyzeTypeScriptRepo } = require('./file-tree-mapper-typescript'); const data = analyzeTypeScriptRepo(repoPath);
  */
 
 const fs = require("fs");
@@ -10,29 +13,12 @@ const path = require("path");
 const glob = require("glob");
 const { extractFunctionsAndCalls, extractImports: extractImportsTS } = require("./extract-functions-typescript");
 const { extractClasses } = require("./extract-classes-typescript");
-
-// Import JavaScript parsers for .js/.jsx files
-const { buildPackageMapper: buildPackageMapperJs,analyzeImports: analyzeImportsJs } = require("../nodejs/file-tree-mapper-nodejs");
 const { loadPathAliases, resolveWithAlias } = require("./resolve-path-aliases");
-
-if (process.argv.length < 4) {
-  console.error(
-    "Usage: node typescript/file-tree-mapper-typescript.js <repoPath> <importsOutput.json>"
-  );
-  process.exit(1);
-}
-
-const repoPath = path.resolve(process.argv[2]);
-const importsOutput = path.resolve(process.argv[3]);
-const mapperOutput = "mapper.json";   // TEMP FILE
-
-// Load path aliases from tsconfig.json
-const pathAliases = loadPathAliases(repoPath);
 
 // -------------------------------------------------------------
 // Get TypeScript files only
 // -------------------------------------------------------------
-function getTsFilesOnly() {
+function getTsFilesOnly(repoPath) {
   return glob.sync(`${repoPath}/**/*.{ts,tsx}`, {
     ignore: [
       `${repoPath}/**/node_modules/**`,
@@ -58,8 +44,8 @@ function getJsFilesOnly() {
 // -------------------------------------------------------------
 // Analyze TypeScript files (.ts, .tsx)
 // -------------------------------------------------------------
-function analyzeTypeScriptFiles() {
-  const tsFiles = getTsFilesOnly();
+function analyzeTypeScriptFiles(repoPath, pathAliases) {
+  const tsFiles = getTsFilesOnly(repoPath);
   const results = [];
   const totalFiles = tsFiles.length;
 
@@ -207,42 +193,40 @@ function analyzeTypeScriptFiles() {
 }
 
 // -------------------------------------------------------------
-// Analyze JavaScript files (.js, .jsx)
+// Main export function - to be called from main.js
 // -------------------------------------------------------------
-function analyzeJavaScriptFiles() {
-   const mapperForJs = buildPackageMapperJs(repoPath);
-      fs.writeFileSync(mapperOutput, JSON.stringify(mapperForJs, null, 2));
-      console.log(`🛠️  Temporary mapper saved → ${mapperOutput}`);
+function analyzeTypeScriptRepo(repoPath) {
+  const pathAliases = loadPathAliases(repoPath);
+  console.log(`📂 Scanning TypeScript repo: ${repoPath}`);
 
-      const analysis = analyzeImportsJs(repoPath, mapperForJs);
-
-      // DELETE TEMP FILE
-      fs.unlinkSync(mapperOutput);
-      console.log(`🗑️  Deleted temporary file: ${mapperOutput}`);
-      return analysis;
-}
-
-// -------------------------------------------------------------
-// MAIN
-// -------------------------------------------------------------
-(() => {
-  console.log(`📂 Scanning TypeScript/JavaScript repo: ${repoPath}`);
-
-  // Analyze TypeScript files
-  const tsResults = analyzeTypeScriptFiles();
-
-  // Analyze JavaScript files
-  const jsResults = analyzeJavaScriptFiles();
-
-  // Merge results
-  const mergedResults = [...tsResults, ...jsResults];
+  const tsResults = analyzeTypeScriptFiles(repoPath, pathAliases);
 
   console.log(`\n📊 Summary:`);
   console.log(`   TypeScript files: ${tsResults.length}`);
-  console.log(`   JavaScript files: ${jsResults.length}`);
-  console.log(`   Total files: ${mergedResults.length}\n`);
 
-  // Write merged results
-  fs.writeFileSync(importsOutput, JSON.stringify(mergedResults, null, 2));
+  return tsResults;
+}
+
+// Export the main function
+module.exports = { analyzeTypeScriptRepo };
+
+// -------------------------------------------------------------
+// CLI mode - only run if executed directly (not imported)
+// -------------------------------------------------------------
+if (require.main === module) {
+  if (process.argv.length < 4) {
+    console.error(
+      "Usage: node typescript/file-tree-mapper-typescript.js <repoPath> <importsOutput.json>"
+    );
+    process.exit(1);
+  }
+
+  const repoPath = path.resolve(process.argv[2]);
+  const importsOutput = path.resolve(process.argv[3]);
+
+  const results = analyzeTypeScriptRepo(repoPath);
+
+  // Write results to file
+  fs.writeFileSync(importsOutput, JSON.stringify(results, null, 2));
   console.log(`✅ Final output written → ${importsOutput}`);
-})();
+}
