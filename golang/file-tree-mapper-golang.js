@@ -81,9 +81,24 @@ function extractImports(filePath) {
 function analyzeImports(repoPath) {
   const goFiles = getGoFiles(repoPath);
   const results = [];
+  const totalFiles = goFiles.length;
 
-  for (const file of goFiles) {
+  const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  let spinnerIndex = 0;
+
+  console.log(`\n📊 Go files to process: ${totalFiles}\n`);
+
+  for (let i = 0; i < goFiles.length; i++) {
+    const file = goFiles[i];
+
     try {
+      const percentage = ((i / totalFiles) * 100).toFixed(1);
+      const spinner = spinnerFrames[spinnerIndex % spinnerFrames.length];
+      const fileName = path.relative(repoPath, file);
+
+      process.stdout.write(`\r${spinner} Processing Go: ${i}/${totalFiles} (${percentage}%) - ${fileName.substring(0, 60).padEnd(60, ' ')}`);
+      spinnerIndex++;
+
       const imports = extractImports(file);
       const importFiles = [];
       const externalImports = [];
@@ -144,9 +159,13 @@ function analyzeImports(repoPath) {
         classes,
       });
     } catch (e) {
-      console.log(`Error analyzing ${file}:`, e);
+      console.log(`\n❌ Error analyzing ${file}:`, e);
     }
   }
+
+  // Clear the progress line and show completion
+  process.stdout.write(`\r${' '.repeat(120)}\r`);
+  console.log(`✅ Processed ${results.length}/${totalFiles} Go files\n`);
 
   return results;
 }
