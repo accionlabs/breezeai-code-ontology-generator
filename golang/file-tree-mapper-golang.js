@@ -1,8 +1,4 @@
 #!/usr/bin/env node
-/**
- * Go Import Analyzer
- * Usage: node file-tree-mapper-golang.js <repoPath> <importsOutput.json>
- */
 
 const fs = require("fs");
 const path = require("path");
@@ -12,21 +8,11 @@ const Go = require("tree-sitter-go");
 const { extractFunctionsAndCalls } = require("./extract-functions-golang");
 const { extractClasses } = require("./extract-classes-golang");
 
-// Wrapper function to analyze Golang repository
-function analyzeGolangRepo(repoPath) {
-  const mapper = buildPackageMapper(repoPath);
-  const analysis = analyzeImports(repoPath, mapper);
-  return analysis;
-}
-
-// -------------------------------------------------------------
-// Initialize parser
-// -------------------------------------------------------------
 const parser = new Parser();
 parser.setLanguage(Go);
 
 // -------------------------------------------------------------
-// Helper functions
+// Helpers
 // -------------------------------------------------------------
 function traverse(node, callback) {
   callback(node);
@@ -39,225 +25,148 @@ function getNodeText(node, sourceText) {
   return sourceText.slice(node.startIndex, node.endIndex);
 }
 
-// -------------------------------------------------------------
-// Step 1: Extract package names
-// -------------------------------------------------------------
-function extractPackageNames(filePath, repoPath) {
-  const relPath = path.relative(repoPath, filePath);
-  // For Go, package name is typically the directory name
-  const packageName = path.basename(path.dirname(filePath));
-  return [packageName, relPath];
-}
-
-// -------------------------------------------------------------
-// Step 2: Extract Go imports
-// -------------------------------------------------------------
-function extractImports(filePath) {
-  const sourceText = fs.readFileSync(filePath, "utf8").replace(/\0/g, "");
-  if (!sourceText.trim()) return { imports: [], libPaths: [] };
-
-  const tree = parser.parse(sourceText);
-  const imports = [];
-  const libPaths = [];
-
-  traverse(tree.rootNode, (node) => {
-    if (node.type === "import_declaration") {
-      // Single import: import "fmt"
-      const importSpec = node.childForFieldName("spec");
-      if (importSpec && importSpec.type === "import_spec") {
-        const pathNode = importSpec.childForFieldName("path");
-        if (pathNode) {
-          imports.push(getNodeText(pathNode, sourceText).replace(/["']/g, ""));
-        }
-      }
-
-      // Multiple imports: import ( "fmt" "os" )
-      for (let i = 0; i < node.childCount; i++) {
-        const child = node.child(i);
-        if (child.type === "import_spec_list") {
-          for (let j = 0; j < child.childCount; j++) {
-            const spec = child.child(j);
-            if (spec.type === "import_spec") {
-              const pathNode = spec.childForFieldName("path");
-              if (pathNode) {
-                imports.push(getNodeText(pathNode, sourceText).replace(/["']/g, ""));
-              }
-            }
-          }
-        }
-      }
-    }
-  });
-
-  return { imports, libPaths };
-}
-
-// -------------------------------------------------------------
-// Step 3: Build mapper
-// -------------------------------------------------------------
-function buildPackageMapper(repoPath) {
-  const goFiles = getGoFiles(repoPath);
-
-  const mapper = {};
-  for (const file of goFiles) {
-    try {
-      const [pkgName, relPath] = extractPackageNames(file, repoPath);
-      mapper[pkgName] = relPath;
-    } catch (err) {
-      console.log("Error analyzing file for mapper:", file);
-    }
-  }
-
-  return mapper;
-}
-
 function getGoFiles(repoPath) {
   return glob.sync(`${repoPath}/**/*.go`, {
     ignore: [
       `${repoPath}/**/vendor/**`,
-      `${repoPath}/**/build/**`,
+      `${repoPath}/**/.git/**`,
       `${repoPath}/**/dist/**`,
-      `${repoPath}/**/.git/**`
+      `${repoPath}/**/build/**`,
     ],
   });
 }
 
+function findGoMod(startDir) {
+  let dir = path.resolve(startDir);
+
+  while (dir !== path.dirname(dir)) {
+    const candidate = path.join(dir, "go.mod");
+    if (fs.existsSync(candidate)) return candidate;
+    dir = path.dirname(dir);
+  }
+  return null;
+}
+
+function readModuleName(goModPath) {
+  const content = fs.readFileSync(goModPath, "utf8");
+  const match = content.match(/^module\s+(.+)$/m);
+  return match ? match[1].trim() : null;
+}
+
 // -------------------------------------------------------------
-// Step 4: Analyze imports
+// Import Extraction
 // -------------------------------------------------------------
-function analyzeImports(repoPath, mapper) {
-  console.log("Started working...");
+function extractImports(filePath) {
+  const sourceText = fs.readFileSync(filePath, "utf8").replace(/\0/g, "");
+  if (!sourceText.trim()) return [];
+
+  const tree = parser.parse(sourceText);
+  const imports = [];
+
+  traverse(tree.rootNode, (node) => {
+    if (node.type === "import_spec") {
+      const pathNode = node.childForFieldName("path");
+      if (pathNode) {
+        imports.push(getNodeText(pathNode, sourceText).replace(/["']/g, ""));
+      }
+    }
+  });
+
+  return imports;
+}
+
+// -------------------------------------------------------------
+// Analyze Imports
+// -------------------------------------------------------------
+function analyzeImports(repoPath) {
   const goFiles = getGoFiles(repoPath);
-
   const results = [];
-  const totalFiles = goFiles.length;
-  const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-  let spinnerIndex = 0;
 
-  console.log(`\n📊 Total files to process: ${totalFiles}\n`);
-
-  for (let i = 0; i < goFiles.length; i++) {
-    const file = goFiles[i];
-
+  for (const file of goFiles) {
     try {
-      // Show progress with spinner
-      const percentage = ((i / totalFiles) * 100).toFixed(1);
-      const spinner = spinnerFrames[spinnerIndex % spinnerFrames.length];
-      const fileName = path.relative(repoPath, file);
-
-      process.stdout.write(`\r${spinner} Processing: ${i}/${totalFiles} (${percentage}%) - ${fileName.substring(0, 60).padEnd(60, ' ')}`);
-      spinnerIndex++;
-
-      const { imports } = extractImports(file);
+      const imports = extractImports(file);
       const importFiles = [];
       const externalImports = [];
 
-      // Helper function to try resolving a path
-      function tryResolveGoPath(basePath) {
-        // Check if directory exists (Go packages are directories)
-        if (fs.existsSync(basePath) && fs.statSync(basePath).isDirectory()) {
-          return basePath;
-        }
+      const goModPath = findGoMod(path.dirname(file));
+      let moduleName = null;
+      let moduleRoot = null;
 
-        // Try with .go extension
-        if (fs.existsSync(basePath + ".go")) {
-          return basePath + ".go";
-        }
-
-        return null;
+      if (goModPath) {
+        moduleRoot = path.dirname(goModPath);
+        moduleName = readModuleName(goModPath);
       }
 
       for (let imp of imports) {
-        let resolvedPath = null;
-        let isResolved = false;
+        let resolved = false;
 
-        // Handle relative imports (./package or ../package)
-        if (imp.startsWith(".")) {
-          resolvedPath = path.resolve(path.dirname(file), imp);
-        }
-        // Handle absolute imports from project root
-        else if (imp.startsWith("/")) {
-          resolvedPath = path.join(repoPath, imp);
-        }
-        // Try to resolve as a local module
-        else {
-          // Check if it's a local package (not a standard library or third-party)
-          // Try to find it in common locations
-          const possiblePaths = [
-            path.join(repoPath, imp),
-            path.join(repoPath, 'pkg', imp),
-            path.join(repoPath, 'internal', imp),
-            path.join(repoPath, 'src', imp)
-          ];
+        // Local module import
+        if (moduleName && imp.startsWith(moduleName)) {
+          const rel = imp.slice(moduleName.length);
+          const pkgDir = path.join(moduleRoot, rel);
 
-          for (const possiblePath of possiblePaths) {
-            const testPath = tryResolveGoPath(possiblePath);
-            if (testPath) {
-              resolvedPath = testPath;
-              break;
-            }
+          if (fs.existsSync(pkgDir) && fs.statSync(pkgDir).isDirectory()) {
+            const files = fs.readdirSync(pkgDir)
+              .filter(f => f.endsWith(".go") && !f.endsWith("_test.go"))
+              .map(f => path.relative(repoPath, path.join(pkgDir, f)));
+
+            importFiles.push(...files);
+            resolved = true;
           }
         }
 
-        // If we have a potential path, verify it exists
-        if (resolvedPath && !isResolved) {
-          const finalPath = tryResolveGoPath(resolvedPath);
+        // Relative import (rare)
+        if (!resolved && imp.startsWith(".")) {
+          const abs = path.resolve(path.dirname(file), imp);
+          if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
+            const files = fs.readdirSync(abs)
+              .filter(f => f.endsWith(".go"))
+              .map(f => path.relative(repoPath, path.join(abs, f)));
 
-          if (finalPath && fs.existsSync(finalPath)) {
-            const relativePath = path.relative(repoPath, finalPath);
-            // Make sure it's within the repo
-            if (!relativePath.startsWith('..') && !path.isAbsolute(relativePath)) {
-              importFiles.push(relativePath);
-              isResolved = true;
-              continue;
-            }
+            importFiles.push(...files);
+            resolved = true;
           }
         }
 
-        // If we couldn't resolve it as a local file, it's an external import
-        if (!isResolved) {
-          externalImports.push(imp); // Standard library or third-party imports
+        if (!resolved) {
+          externalImports.push(imp);
         }
       }
 
-      // Extract functions for this file
       const functions = extractFunctionsAndCalls(file, repoPath);
-
-      // Extract structs and interfaces
       const classes = extractClasses(file, repoPath);
 
       results.push({
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
-        functions: functions,
-        classes
+        functions,
+        classes,
       });
     } catch (e) {
-      process.stdout.write('\n');
-      console.log(`❌ Error analyzing file: ${file} - ${e.message}`);
+      console.log(`Error analyzing ${file}:`, e);
     }
   }
-
-  // Clear progress line and show completion
-  process.stdout.write('\r' + ' '.repeat(150) + '\r');
-  console.log(`✅ Completed processing ${totalFiles} files\n`);
 
   return results;
 }
 
 // -------------------------------------------------------------
-// EXPORTS (for use in other files if needed)
+// Wrapper
 // -------------------------------------------------------------
+function analyzeGolangRepo(repoPath) {
+  return analyzeImports(repoPath);
+}
+
 module.exports = { analyzeGolangRepo };
 
 // -------------------------------------------------------------
-// MAIN EXECUTION
+// Main
 // -------------------------------------------------------------
 if (require.main === module) {
   if (process.argv.length < 4) {
     console.error(
-      "Usage: node golang/file-tree-mapper-golang.js <repoPath> <importsOutput.json>"
+      "Usage: node file-tree-mapper-golang.js <repoPath> <importsOutput.json>"
     );
     process.exit(1);
   }
@@ -265,9 +174,10 @@ if (require.main === module) {
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
 
-  console.log(`📂 Scanning Go repo: ${repoPath}`);
+  console.log(`Scanning Go repo: ${repoPath}`);
 
   const analysis = analyzeGolangRepo(repoPath);
   fs.writeFileSync(importsOutput, JSON.stringify(analysis, null, 2));
-  console.log(`✅ Final output written to → ${importsOutput}`);
+
+  console.log(`Output written to → ${importsOutput}`);
 }
