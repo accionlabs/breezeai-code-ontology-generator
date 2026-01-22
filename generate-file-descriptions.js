@@ -119,6 +119,44 @@ Examples:
 // LLM Provider Implementations
 // -------------------------------------------------------------
 
+// Custom error class for API errors
+class APIError extends Error {
+  constructor(message, statusCode, isRetryable = false, isQuotaError = false) {
+    super(message);
+    this.name = 'APIError';
+    this.statusCode = statusCode;
+    this.isRetryable = isRetryable;
+    this.isQuotaError = isQuotaError;
+  }
+}
+
+// Check if error is quota/rate limit related
+function isQuotaOrRateLimitError(statusCode, responseBody) {
+  // Rate limit errors
+  if (statusCode === 429) return { isQuota: false, isRateLimit: true };
+
+  // Quota exceeded errors
+  if (statusCode === 402 || statusCode === 403) {
+    const errorMsg = JSON.stringify(responseBody).toLowerCase();
+    if (errorMsg.includes('quota') || errorMsg.includes('exceeded') ||
+        errorMsg.includes('limit') || errorMsg.includes('billing') ||
+        errorMsg.includes('insufficient')) {
+      return { isQuota: true, isRateLimit: false };
+    }
+  }
+
+  // Check response body for quota-related messages
+  if (responseBody && responseBody.error) {
+    const errorMsg = (responseBody.error.message || responseBody.error.type || '').toLowerCase();
+    if (errorMsg.includes('quota') || errorMsg.includes('rate_limit') ||
+        errorMsg.includes('exceeded') || errorMsg.includes('insufficient_quota')) {
+      return { isQuota: true, isRateLimit: statusCode === 429 };
+    }
+  }
+
+  return { isQuota: false, isRateLimit: false };
+}
+
 class LLMProvider {
   constructor(config) {
     this.config = config;
@@ -192,19 +230,50 @@ Respond with ONLY the JSON object.`;
         let data = "";
         res.on("data", (chunk) => (data += chunk));
         res.on("end", () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
+          const statusCode = res.statusCode;
+
+          try {
+            let parsed;
             try {
-              resolve(JSON.parse(data));
+              parsed = JSON.parse(data);
             } catch (e) {
-              reject(new Error(`Failed to parse response: ${e.message}`));
+              parsed = { error: { message: data } };
             }
-          } else {
-            reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+
+            // Check for HTTP errors
+            if (statusCode < 200 || statusCode >= 300) {
+              const { isQuota } = isQuotaOrRateLimitError(statusCode, parsed);
+
+              if (isQuota) {
+                reject(new APIError(
+                  `API quota exceeded: ${parsed.error?.message || 'Please check your billing/quota settings'}`,
+                  statusCode,
+                  false,
+                  true
+                ));
+                return;
+              }
+
+              reject(new APIError(
+                `API request failed: ${parsed.error?.message || `HTTP ${statusCode}`}`,
+                statusCode,
+                false,
+                false
+              ));
+              return;
+            }
+
+            resolve(parsed);
+          } catch (e) {
+            reject(new Error(`Failed to process response: ${e.message}`));
           }
         });
       });
 
-      req.on("error", reject);
+      req.on("error", (err) => {
+        reject(new APIError(`Network error: ${err.message}`, 0, false, false));
+      });
+
       req.write(JSON.stringify(body));
       req.end();
     });
@@ -369,109 +438,98 @@ async function processFiles(config) {
 
   const maxFileSizeBytes = config.maxFileSizeKB * 1024;
 
-  // Process files with concurrency control
+  // Process files one at a time
   let processed = 0;
   let skipped = 0;
-  let failed = 0;
   let updated = 0;
 
-  const processBatch = async (batch) => {
-    return Promise.all(
-      batch.map(async (fileEntry) => {
-        const relativePath = fileEntry.path;
-        const fullPath = path.join(config.repoPath, relativePath);
-
-        // Skip if already has descriptions
-        const hasFileDesc = fileEntry.description && !fileEntry.description.startsWith("[Error:");
-        const allClassesHaveDesc = (fileEntry.classes || []).every(c => c.description);
-        const allFunctionsHaveDesc = (fileEntry.functions || []).every(f => f.description);
-
-        if (hasFileDesc && allClassesHaveDesc && allFunctionsHaveDesc) {
-          console.log(`⏭️  Already complete: ${relativePath}`);
-          skipped++;
-          return fileEntry;
-        }
-
-        try {
-          // Check if file exists
-          if (!fs.existsSync(fullPath)) {
-            console.log(`⚠️  File not found: ${relativePath}`);
-            skipped++;
-            return fileEntry;
-          }
-
-          // Check file size
-          const stats = fs.statSync(fullPath);
-          if (stats.size > maxFileSizeBytes) {
-            console.log(`⏭️  Skipping large file: ${relativePath} (${Math.round(stats.size / 1024)}KB)`);
-            skipped++;
-            return fileEntry;
-          }
-
-          // Read file content
-          const content = fs.readFileSync(fullPath, "utf8");
-
-          // Generate descriptions
-          console.log(`🔍 Processing: ${relativePath}`);
-          const descriptions = await provider.generateDescriptions(relativePath, content, fileEntry);
-
-          processed++;
-          updated++;
-
-          // Apply descriptions
-          const updatedEntry = { ...fileEntry };
-
-          // File description
-          if (descriptions.file) {
-            updatedEntry.description = descriptions.file;
-          }
-
-          // Class descriptions
-          if (updatedEntry.classes && descriptions.classes) {
-            updatedEntry.classes = updatedEntry.classes.map(cls => ({
-              ...cls,
-              description: descriptions.classes[cls.name] || cls.description
-            }));
-          }
-
-          // Function descriptions
-          if (updatedEntry.functions && descriptions.functions) {
-            updatedEntry.functions = updatedEntry.functions.map(fn => ({
-              ...fn,
-              description: descriptions.functions[fn.name] || fn.description
-            }));
-          }
-
-          console.log(`✅ [${processed}] ${relativePath}`);
-          return updatedEntry;
-
-        } catch (error) {
-          failed++;
-          console.error(`❌ Error processing ${relativePath}: ${error.message}`);
-          return fileEntry;
-        }
-      })
-    );
+  // Helper function to save progress
+  const saveProgress = () => {
+    const outputData = hasProjectMetaData
+      ? { ...fullData, files: fileTree }
+      : fileTree;
+    fs.writeFileSync(config.treeJsonFile, JSON.stringify(outputData, null, 2));
   };
 
-  const results = [];
+  for (let i = 0; i < fileTree.length; i++) {
+    const fileEntry = fileTree[i];
+    const relativePath = fileEntry.path;
+    const fullPath = path.join(config.repoPath, relativePath);
 
-  // Process in batches to respect rate limits
-  for (let i = 0; i < fileTree.length; i += config.maxConcurrent) {
-    const batch = fileTree.slice(i, i + config.maxConcurrent);
-    const batchResults = await processBatch(batch);
-    results.push(...batchResults);
+    // Skip if already has descriptions
+    const hasFileDesc = fileEntry.description && !fileEntry.description.startsWith("[Error:");
+    const allClassesHaveDesc = (fileEntry.classes || []).every(c => c.description);
+    const allFunctionsHaveDesc = (fileEntry.functions || []).every(f => f.description);
 
-    // Save progress after each batch (incremental updates)
-    const outputData = hasProjectMetaData
-      ? { ...fullData, files: results }
-      : results;
-    fs.writeFileSync(config.treeJsonFile, JSON.stringify(outputData, null, 2));
-    console.log(`💾 Progress saved (${results.length}/${fileTree.length} files)`);
+    if (hasFileDesc && allClassesHaveDesc && allFunctionsHaveDesc) {
+      console.log(`⏭️  Already complete: ${relativePath}`);
+      skipped++;
+      continue;
+    }
 
-    // Small delay between batches to avoid rate limiting
-    if (i + config.maxConcurrent < fileTree.length) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    // Check if file exists
+    if (!fs.existsSync(fullPath)) {
+      console.log(`⚠️  File not found: ${relativePath}`);
+      skipped++;
+      continue;
+    }
+
+    // Check file size
+    const stats = fs.statSync(fullPath);
+    if (stats.size > maxFileSizeBytes) {
+      console.log(`⏭️  Skipping large file: ${relativePath} (${Math.round(stats.size / 1024)}KB)`);
+      skipped++;
+      continue;
+    }
+
+    try {
+      // Read file content
+      const content = fs.readFileSync(fullPath, "utf8");
+
+      // Generate descriptions
+      console.log(`🔍 Processing: ${relativePath}`);
+      const descriptions = await provider.generateDescriptions(relativePath, content, fileEntry);
+
+      processed++;
+      updated++;
+
+      // Apply descriptions directly to fileTree entry (preserve existing)
+      if (descriptions.file && !fileEntry.description) {
+        fileEntry.description = descriptions.file;
+      }
+
+      // Class descriptions (preserve existing)
+      if (fileEntry.classes && descriptions.classes) {
+        fileEntry.classes = fileEntry.classes.map(cls => ({
+          ...cls,
+          description: cls.description || descriptions.classes[cls.name]
+        }));
+      }
+
+      // Function descriptions (preserve existing)
+      if (fileEntry.functions && descriptions.functions) {
+        fileEntry.functions = fileEntry.functions.map(fn => ({
+          ...fn,
+          description: fn.description || descriptions.functions[fn.name]
+        }));
+      }
+
+      console.log(`✅ [${processed}] ${relativePath}`);
+
+      // Save progress after each file
+      saveProgress();
+      console.log(`💾 Progress saved (${i + 1}/${fileTree.length} files)`);
+
+    } catch (error) {
+      // Save progress before exiting on error
+      saveProgress();
+      console.error(`\n❌ Error processing ${relativePath}:`, error.message || error);
+      console.log(`\n⚠️  Stopping due to error. Progress has been saved.`);
+      console.log(`   Total files: ${fileTree.length}`);
+      console.log(`   Updated: ${updated}`);
+      console.log(`   Skipped: ${skipped}`);
+      console.log(`   JSON file updated: ${config.treeJsonFile}`);
+      process.exit(1);
     }
   }
 
@@ -479,7 +537,6 @@ async function processFiles(config) {
   console.log(`   Total files: ${fileTree.length}`);
   console.log(`   Updated: ${updated}`);
   console.log(`   Skipped: ${skipped}`);
-  console.log(`   Failed: ${failed}`);
   console.log(`   JSON file updated: ${config.treeJsonFile}`);
 }
 
