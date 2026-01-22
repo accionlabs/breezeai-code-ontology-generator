@@ -45,7 +45,7 @@ if (!config.model) {
   const defaultModels = {
     openai: "gpt-4o-mini",
     claude: "claude-3-5-haiku-20241022",
-    gemini: "gemini-2.0-flash-exp",
+    gemini: "gemini-2.5-flash",
     custom: "llama3.2"
   };
   config.model = defaultModels[config.provider] || "gpt-4o-mini";
@@ -197,6 +197,44 @@ async function callCustom(prompt) {
   }, body);
 }
 
+// Custom error class for API errors
+class APIError extends Error {
+  constructor(message, statusCode, isRetryable = false, isQuotaError = false) {
+    super(message);
+    this.name = 'APIError';
+    this.statusCode = statusCode;
+    this.isRetryable = isRetryable;
+    this.isQuotaError = isQuotaError;
+  }
+}
+
+// Check if error is quota/rate limit related
+function isQuotaOrRateLimitError(statusCode, responseBody) {
+  // Rate limit errors
+  if (statusCode === 429) return { isQuota: false, isRateLimit: true };
+
+  // Quota exceeded errors
+  if (statusCode === 402 || statusCode === 403) {
+    const errorMsg = JSON.stringify(responseBody).toLowerCase();
+    if (errorMsg.includes('quota') || errorMsg.includes('exceeded') ||
+        errorMsg.includes('limit') || errorMsg.includes('billing') ||
+        errorMsg.includes('insufficient')) {
+      return { isQuota: true, isRateLimit: false };
+    }
+  }
+
+  // Check response body for quota-related messages
+  if (responseBody && responseBody.error) {
+    const errorMsg = (responseBody.error.message || responseBody.error.type || '').toLowerCase();
+    if (errorMsg.includes('quota') || errorMsg.includes('rate_limit') ||
+        errorMsg.includes('exceeded') || errorMsg.includes('insufficient_quota')) {
+      return { isQuota: true, isRateLimit: statusCode === 429 };
+    }
+  }
+
+  return { isQuota: false, isRateLimit: false };
+}
+
 function makeRequest(options, body) {
   return new Promise((resolve, reject) => {
     const protocol = options.protocol === "http:" ? http : https;
@@ -211,6 +249,29 @@ function makeRequest(options, body) {
       res.on("end", () => {
         try {
           const parsed = JSON.parse(data);
+          const statusCode = res.statusCode;
+          // Check for HTTP errors
+          if (statusCode < 200 || statusCode >= 300) {
+            const { isQuota } = isQuotaOrRateLimitError(statusCode, parsed);
+
+            if (isQuota) {
+              reject(new APIError(
+                `API quota exceeded: ${parsed.error?.message || 'Please check your billing/quota settings'}`,
+                statusCode,
+                false,
+                true
+              ));
+              return;
+            }
+
+            reject(new APIError(
+              `API request failed: ${parsed.error?.message || `HTTP ${statusCode}`}`,
+              statusCode,
+              false,
+              false
+            ));
+            return;
+          }
 
           // Extract content based on provider
           let content;
@@ -235,7 +296,10 @@ function makeRequest(options, body) {
       });
     });
 
-    req.on("error", reject);
+    req.on("error", (err) => {
+      reject(new APIError(`Network error: ${err.message}`, 0, false, false));
+    });
+
     req.write(body);
     req.end();
   });
@@ -310,59 +374,61 @@ function readCode(filePath, startLine, endLine) {
   }
 }
 
-// Process a single node
-async function processNode(node, nodeType, filePath) {
-  try {
-    let codeContent = null;
-
-    if (config.mode === "high" && node.startLine && node.endLine) {
-      codeContent = readCode(filePath, node.startLine, node.endLine);
-    }
-
-    const prompt = generatePrompt(node, nodeType, codeContent);
-    const response = await callLLM(prompt);
-
-    const metadata = JSON.parse(response);
-
-    // Add metadata to node
-    node.roles = metadata.roles || [];
-    node.metadata = metadata.metadata || {};
-
-    return true;
-  } catch (err) {
-    console.error(`Error processing ${nodeType}:`, err.message);
-    node.roles = [];
-    node.metadata = {};
-    return false;
-  }
+// Check if node already has metadata
+function hasExistingMetadata(node) {
+  return node.roles && Array.isArray(node.roles) && node.roles.length > 0 &&
+         node.metadata && Object.keys(node.metadata).length > 0;
 }
 
-// Concurrent processing with rate limiting
-async function processConcurrently(items, processor) {
-  const results = [];
-  const executing = [];
-
-  for (const item of items) {
-    const promise = processor(item).then(result => {
-      executing.splice(executing.indexOf(promise), 1);
-      return result;
-    });
-
-    results.push(promise);
-    executing.push(promise);
-
-    if (executing.length >= config.maxConcurrent) {
-      await Promise.race(executing);
-    }
+// Process a single node
+async function processNode(node, nodeType, filePath) {
+  // Skip if already has metadata
+  if (hasExistingMetadata(node)) {
+    console.log(`    ⏭️  Already has metadata: ${node.name || node.path || nodeType}`);
+    return { success: true, skipped: true, error: null };
   }
 
-  return await Promise.all(results);
+  let codeContent = null;
+
+  if (config.mode === "high" && node.startLine && node.endLine) {
+    codeContent = readCode(filePath, node.startLine, node.endLine);
+  }
+
+  const prompt = generatePrompt(node, nodeType, codeContent);
+  const response = await callLLM(prompt);
+
+  const metadata = JSON.parse(response);
+
+  // Add metadata to node
+  node.roles = metadata.roles || [];
+  node.metadata = metadata.metadata || {};
+
+  return { success: true, skipped: false, error: null };
 }
 
 // Main processing function
 async function processData() {
   let totalProcessed = 0;
-  let totalSuccess = 0;
+  let totalSkipped = 0;
+
+  // Helper function to save progress
+  const saveProgress = () => {
+    const outputData = hasProjectMetaData
+      ? { ...fullData, files: data }
+      : data;
+    fs.writeFileSync(outputPath, JSON.stringify(outputData, null, 2));
+  };
+
+  // Helper function to exit with error
+  const exitWithError = (error, context) => {
+    saveProgress();
+    console.error(`\n❌ Error processing ${context}:`, error.message || error);
+    console.log(`\n⚠️  Stopping due to error. Progress has been saved.`);
+    console.log(`   Total nodes processed: ${totalProcessed}`);
+    console.log(`   Total skipped: ${totalSkipped}`);
+    console.log(`\n📝 Updated file: ${outputPath}`);
+    process.exit(1);
+  };
 
   for (let i = 0; i < data.length; i++) {
     const fileEntry = data[i];
@@ -373,53 +439,70 @@ async function processData() {
     // Process file-level metadata
     if (config.nodeTypes.includes("file")) {
       console.log("  📄 Analyzing file...");
-      const success = await processNode(fileEntry, "file", filePath);
-      totalProcessed++;
-      if (success) totalSuccess++;
+      try {
+        const result = await processNode(fileEntry, "file", filePath);
+        if (result.skipped) {
+          totalSkipped++;
+        } else {
+          totalProcessed++;
+          // Save after each successful node
+          saveProgress();
+          console.log(`  💾 Progress saved`);
+        }
+      } catch (error) {
+        exitWithError(error, `file ${filePath}`);
+      }
     }
 
     // Process classes
     if (config.nodeTypes.includes("class") && fileEntry.classes) {
       console.log(`  📦 Analyzing ${fileEntry.classes.length} classes...`);
 
-      await processConcurrently(fileEntry.classes, async (classNode) => {
-        const success = await processNode(classNode, "class", filePath);
-        totalProcessed++;
-        if (success) totalSuccess++;
-      });
+      for (const classNode of fileEntry.classes) {
+        try {
+          const result = await processNode(classNode, "class", filePath);
+          if (result.skipped) {
+            totalSkipped++;
+          } else {
+            totalProcessed++;
+            // Save after each successful node
+            saveProgress();
+            console.log(`    💾 Progress saved`);
+          }
+        } catch (error) {
+          exitWithError(error, `class ${classNode.name} in ${filePath}`);
+        }
+      }
     }
 
     // Process functions
     if (config.nodeTypes.includes("function") && fileEntry.functions) {
       console.log(`  ⚡ Analyzing ${fileEntry.functions.length} functions...`);
 
-      await processConcurrently(fileEntry.functions, async (funcNode) => {
-        const success = await processNode(funcNode, "function", filePath);
-        totalProcessed++;
-        if (success) totalSuccess++;
-      });
-    }
-
-    // Save progress incrementally
-    if ((i + 1) % 10 === 0) {
-      const outputData = hasProjectMetaData
-        ? { ...fullData, files: data }
-        : data;
-      fs.writeFileSync(outputPath, JSON.stringify(outputData, null, 2));
-      console.log(`\n💾 Progress saved (${i + 1}/${data.length} files)`);
+      for (const funcNode of fileEntry.functions) {
+        try {
+          const result = await processNode(funcNode, "function", filePath);
+          if (result.skipped) {
+            totalSkipped++;
+          } else {
+            totalProcessed++;
+            // Save after each successful node
+            saveProgress();
+            console.log(`    💾 Progress saved`);
+          }
+        } catch (error) {
+          exitWithError(error, `function ${funcNode.name} in ${filePath}`);
+        }
+      }
     }
   }
 
   // Final save
-  const finalOutput = hasProjectMetaData
-    ? { ...fullData, files: data }
-    : data;
-  fs.writeFileSync(outputPath, JSON.stringify(finalOutput, null, 2));
+  saveProgress();
 
   console.log(`\n✅ Complete!`);
   console.log(`   Total nodes processed: ${totalProcessed}`);
-  console.log(`   Successful: ${totalSuccess}`);
-  console.log(`   Failed: ${totalProcessed - totalSuccess}`);
+  console.log(`   Total skipped: ${totalSkipped}`);
   console.log(`\n📝 Updated file: ${outputPath}`);
 }
 
