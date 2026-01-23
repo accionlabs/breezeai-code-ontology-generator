@@ -36,14 +36,15 @@ function extractFunctionInfo(node, filePath, repoPath = null, source) {
   const params = extractFunctionParams(node, source);
   const calls = extractDirectCalls(node, source);
 
-  const { visibility, kind, annotations } = getFunctionModifiers(node, source);
+  const { visibility, kind } = getFunctionModifiers(node, source);
+
+  console.log("visibility:", visibility, "kind:", kind, filePath);
 
   return {
     name,
     type: node.type === "constructor_declaration" ? "constructor" : "method",
     visibility,
     kind,
-    annotations,
     params,
     startLine,
     endLine,
@@ -54,7 +55,6 @@ function extractFunctionInfo(node, filePath, repoPath = null, source) {
 function getFunctionModifiers(node, source) {
   let visibility = "private"; // Apex default
   let kind = "instance";
-  const annotations = [];
 
   // Look through all children for modifiers
   for (let i = 0; i < node.childCount; i++) {
@@ -73,21 +73,15 @@ function getFunctionModifiers(node, source) {
         } else if (modText === "protected") {
           visibility = "protected";
         } else if (modText === "global") {
-          visibility = "global"; // Salesforce-specific
+          visibility = "public"; // Salesforce-specific
         } else if (modText === "static") {
           kind = "static";
         }
       }
     }
-
-    // Handle annotations (@AuraEnabled, @future, etc.)
-    if (child.type === "annotation") {
-      const annoText = source.slice(child.startIndex, child.endIndex);
-      annotations.push(annoText);
-    }
   }
 
-  return { visibility, kind, annotations };
+  return { visibility, kind };
 }
 
 function extractFunctionParams(node, source) {

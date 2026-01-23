@@ -42,7 +42,7 @@ function getNodeText(node, sourceText) {
 // -------------------------------------------------------------
 // Step 1: Get Apex files
 // -------------------------------------------------------------
-function getApexFiles() {
+function getApexFiles(repoPath) {
   return glob.sync(`${repoPath}/**/*.{cls,trigger}`, {
     ignore: [
       `${repoPath}/**/node_modules/**`,
@@ -57,7 +57,7 @@ function getApexFiles() {
 // Step 2: Build class index (for resolving references)
 // -------------------------------------------------------------
 function buildClassIndex(repoPath) {
-  const apexFiles = getApexFiles();
+  const apexFiles = getApexFiles(repoPath);
   const classIndex = {};
 
   console.log("📋 Building class index...");
@@ -195,7 +195,7 @@ function isPrimitiveType(typeName) {
 // -------------------------------------------------------------
 function analyzeApexFiles(repoPath, classIndex) {
   console.log("Started analyzing Apex files...");
-  const apexFiles = getApexFiles();
+  const apexFiles = getApexFiles(repoPath);
 
   const results = [];
   const totalFiles = apexFiles.length;

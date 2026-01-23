@@ -43,24 +43,20 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
 
   const {
     constructorParams,
-    methods,
-    properties
+    methods    
   } = extractClassMembers(node, source);
 
-  const { visibility, isAbstract, annotations, sharingMode } = getClassModifiers(node, source);
+  const { visibility, isAbstract } = getClassModifiers(node, source);
 
   return {
     name,
     type: isInterface ? "interface" : "class",
     visibility,
     isAbstract,
-    annotations,
-    sharingMode, // Salesforce-specific: with sharing, without sharing, inherited sharing
     extends: superClass,
     implements: interfaces,
     constructorParams,
     methods,
-    properties,
     startLine,
     endLine
   };
@@ -105,8 +101,6 @@ function getClassModifiers(node, source) {
   let visibility = "private"; // Apex default
   let isAbstract = false;
   let isVirtual = false;
-  const annotations = [];
-  let sharingMode = null;
 
   // Look through all children for modifiers
   for (let i = 0; i < node.childCount; i++) {
@@ -125,7 +119,7 @@ function getClassModifiers(node, source) {
         } else if (modText === "protected") {
           visibility = "protected";
         } else if (modText === "global") {
-          visibility = "global"; // Salesforce-specific
+          visibility = "public"; // Salesforce-specific
         } else if (modText === "abstract") {
           isAbstract = true;
         } else if (modText === "virtual") {
@@ -133,35 +127,18 @@ function getClassModifiers(node, source) {
         }
       }
     }
-
-    // Handle annotations (@isTest, @RestResource, etc.)
-    if (child.type === "annotation") {
-      const annoText = source.slice(child.startIndex, child.endIndex);
-      annotations.push(annoText);
-    }
-
-    // Handle sharing modes (Salesforce-specific)
-    const childText = source.slice(child.startIndex, child.endIndex);
-    if (childText.includes("with sharing")) {
-      sharingMode = "with sharing";
-    } else if (childText.includes("without sharing")) {
-      sharingMode = "without sharing";
-    } else if (childText.includes("inherited sharing")) {
-      sharingMode = "inherited sharing";
-    }
   }
 
-  return { visibility, isAbstract: isAbstract || isVirtual, annotations, sharingMode };
+  return { visibility, isAbstract: isAbstract || isVirtual };
 }
 
 function extractClassMembers(classNode, source) {
   const body = classNode.childForFieldName("body");
   if (!body) {
-    return { constructorParams: [], methods: [], properties: [] };
+    return { constructorParams: [], methods: [] };
   }
 
   const methods = [];
-  const properties = [];
   let constructorParams = [];
 
   for (let i = 0; i < body.childCount; i++) {
@@ -184,17 +161,9 @@ function extractClassMembers(classNode, source) {
         methods.push(source.slice(nameNode.startIndex, nameNode.endIndex));
       }
     }
-
-    // Field/Property
-    if (member.type === "field_declaration") {
-      const fieldInfo = extractFieldInfo(member, source);
-      if (fieldInfo) {
-        properties.push(fieldInfo);
-      }
-    }
   }
 
-  return { constructorParams, methods, properties };
+  return { constructorParams, methods };
 }
 
 function extractParameterNames(paramsNode, source) {
