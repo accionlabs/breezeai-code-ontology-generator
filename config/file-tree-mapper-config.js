@@ -516,6 +516,11 @@ function analyzeConfigRepo(repoPath) {
         }
 
         if (metadata) {
+          // Add empty arrays for consistency with other file types
+          metadata.importFiles = [];
+          metadata.externalImports = [];
+          metadata.functions = [];
+          metadata.classes = [];
           configFiles.push(metadata);
         }
       }
