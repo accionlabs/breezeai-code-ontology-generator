@@ -37,16 +37,13 @@ function extractFunctionInfo(node, filePath, repoPath = null, source) {
   const params = extractFunctionParams(node, source);
   const calls = extractDirectCalls(node, source);
 
-  const { visibility, kind, isAsync, isVirtual, isOverride } = getFunctionModifiers(node, source);
+  const { visibility, kind } = getFunctionModifiers(node, source);
 
   return {
     name,
     type: getFunctionType(node),
     visibility,
     kind,
-    isAsync,
-    isVirtual,
-    isOverride,
     params,
     startLine,
     endLine,
@@ -68,9 +65,6 @@ function getFunctionType(node) {
 function getFunctionModifiers(node, source) {
   let visibility = "private"; // C# default for methods
   let kind = "instance";
-  let isAsync = false;
-  let isVirtual = false;
-  let isOverride = false;
 
   // Look through all children for modifiers
   for (let i = 0; i < node.childCount; i++) {
@@ -87,18 +81,12 @@ function getFunctionModifiers(node, source) {
       visibility = "internal";
     } else if (modText === "static") {
       kind = "static";
-    } else if (modText === "async") {
-      isAsync = true;
-    } else if (modText === "virtual") {
-      isVirtual = true;
-    } else if (modText === "override") {
-      isOverride = true;
     } else if (modText === "abstract") {
       kind = "abstract";
     }
   }
 
-  return { visibility, kind, isAsync, isVirtual, isOverride };
+  return { visibility, kind };
 }
 
 function extractFunctionParams(node, source) {

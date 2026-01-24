@@ -38,8 +38,6 @@ function extractFunctionInfo(node, filePath, repoPath = null, source) {
 
   const { visibility, kind } = getFunctionModifiers(node, source);
 
-  console.log("visibility:", visibility, "kind:", kind, filePath);
-
   return {
     name,
     type: node.type === "constructor_declaration" ? "constructor" : "method",

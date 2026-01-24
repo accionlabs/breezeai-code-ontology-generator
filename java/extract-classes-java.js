@@ -43,8 +43,7 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
 
   const {
     constructorParams,
-    methods,
-    properties
+    methods
   } = extractClassMembers(node, source);
 
   const { visibility, isAbstract } = getClassModifiers(node, source);
@@ -58,7 +57,6 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
     implements: interfaces,
     constructorParams,
     methods,
-    properties,
     startLine,
     endLine
   };
@@ -132,11 +130,10 @@ function getClassModifiers(node, source) {
 function extractClassMembers(classNode, source) {
   const body = classNode.childForFieldName("body");
   if (!body) {
-    return { constructorParams: [], methods: [], properties: [] };
+    return { constructorParams: [], methods: [] };
   }
 
   const methods = [];
-  const properties = [];
   let constructorParams = [];
 
   for (let i = 0; i < body.childCount; i++) {
@@ -159,15 +156,9 @@ function extractClassMembers(classNode, source) {
         methods.push(source.slice(nameNode.startIndex, nameNode.endIndex));
       }
     }
-
-    // Fields (properties)
-    if (member.type === "field_declaration") {
-      const fieldInfos = extractFieldInfo(member, source);
-      properties.push(...fieldInfos);
-    }
   }
 
-  return { constructorParams, methods, properties };
+  return { constructorParams, methods };
 }
 
 function extractParameterNames(paramsNode, source) {

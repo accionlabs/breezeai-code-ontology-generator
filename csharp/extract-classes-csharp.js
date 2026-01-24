@@ -48,25 +48,20 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
 
   const {
     constructorParams,
-    methods,
-    properties
+    methods
   } = extractClassMembers(node, source, typeKind);
 
-  const { visibility, isAbstract, isSealed, isStatic, isPartial } = getClassModifiers(node, source);
+  const { visibility, isAbstract } = getClassModifiers(node, source);
 
   return {
     name,
     type: typeKind,
     visibility,
     isAbstract,
-    isSealed,
-    isStatic,
-    isPartial,
     extends: superClass,
     implements: interfaces,
     constructorParams,
     methods,
-    properties,
     startLine,
     endLine
   };
@@ -136,16 +131,13 @@ function getInheritanceInfo(node, source) {
 function getClassModifiers(node, source) {
   let visibility = "internal"; // C# default
   let isAbstract = false;
-  let isSealed = false;
-  let isStatic = false;
-  let isPartial = false;
 
   // Look through all children for modifiers
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i);
     const childText = source.slice(child.startIndex, child.endIndex);
 
-    if (child.type === "modifier" || childText.match(/^(public|private|protected|internal|abstract|sealed|static|partial)$/)) {
+    if (child.type === "modifier" || childText.match(/^(public|private|protected|internal|abstract)$/)) {
       if (childText === "public") {
         visibility = "public";
       } else if (childText === "private") {
@@ -156,27 +148,20 @@ function getClassModifiers(node, source) {
         visibility = "internal";
       } else if (childText === "abstract") {
         isAbstract = true;
-      } else if (childText === "sealed") {
-        isSealed = true;
-      } else if (childText === "static") {
-        isStatic = true;
-      } else if (childText === "partial") {
-        isPartial = true;
       }
     }
   }
 
-  return { visibility, isAbstract, isSealed, isStatic, isPartial };
+  return { visibility, isAbstract };
 }
 
 function extractClassMembers(classNode, source, typeKind) {
   const body = classNode.childForFieldName("body");
   if (!body) {
-    return { constructorParams: [], methods: [], properties: [] };
+    return { constructorParams: [], methods: [] };
   }
 
   const methods = [];
-  const properties = [];
   let constructorParams = [];
 
   for (let i = 0; i < body.childCount; i++) {
@@ -199,38 +184,9 @@ function extractClassMembers(classNode, source, typeKind) {
         methods.push(source.slice(nameNode.startIndex, nameNode.endIndex));
       }
     }
-
-    // Properties
-    if (member.type === "property_declaration") {
-      const propInfo = extractPropertyInfo(member, source);
-      if (propInfo) {
-        properties.push(propInfo);
-      }
-    }
-
-    // Fields
-    if (member.type === "field_declaration") {
-      const fieldInfos = extractFieldInfo(member, source);
-      properties.push(...fieldInfos);
-    }
-
-    // Enum members
-    if (member.type === "enum_member_declaration") {
-      const nameNode = member.childForFieldName("name");
-      if (nameNode) {
-        properties.push({
-          name: source.slice(nameNode.startIndex, nameNode.endIndex),
-          type: "enum_member",
-          visibility: "public",
-          isStatic: true,
-          isFinal: true,
-          hasDefault: false
-        });
-      }
-    }
   }
 
-  return { constructorParams, methods, properties };
+  return { constructorParams, methods };
 }
 
 function extractParameterNames(paramsNode, source) {
