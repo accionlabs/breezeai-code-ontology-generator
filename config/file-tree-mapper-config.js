@@ -438,6 +438,7 @@ function analyzeConfigRepo(repoPath) {
   console.log("\n📋 Analyzing root-level configuration files...");
 
   const configFiles = [];
+  const processedFiles = new Set(); // Track processed files to avoid duplicates
   const stats = {
     json: 0,
     yaml: 0,
@@ -469,6 +470,12 @@ function analyzeConfigRepo(repoPath) {
           // Skip files in subdirectories
           continue;
         }
+
+        // Skip if already processed (avoid duplicates from overlapping patterns)
+        if (processedFiles.has(file)) {
+          continue;
+        }
+        processedFiles.add(file);
 
         let metadata;
 
