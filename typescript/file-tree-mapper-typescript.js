@@ -31,7 +31,7 @@ function getTsFilesOnly(repoPath) {
 // -------------------------------------------------------------
 // Get JavaScript files only
 // -------------------------------------------------------------
-function getJsFilesOnly() {
+function getJsFilesOnly(repoPath) {
   return glob.sync(`${repoPath}/**/*.{js,jsx}`, {
     ignore: [
       `${repoPath}/**/node_modules/**`,

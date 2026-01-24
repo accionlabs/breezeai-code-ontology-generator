@@ -36,7 +36,7 @@ function getCSharpFiles(repoPath) {
 // Build comprehensive class index
 // Maps: className -> file, FQCN -> file, methodName -> [files]
 // -------------------------------------------------------------
-function buildClassIndex(files) {
+function buildClassIndex(files, repoPath) {
   const classIndex = {};      // className -> file path
   const fqcnIndex = {};       // Namespace.ClassName -> file path
   const methodIndex = {};     // methodName -> [{ className, filePath }]
@@ -290,7 +290,7 @@ function analyzeCSharpRepo(repoPath) {
   const totalFiles = csFiles.length;
 
   console.log(`\n📂 Building class and method index...`);
-  const { classIndex, fqcnIndex, methodIndex } = buildClassIndex(csFiles);
+  const { classIndex, fqcnIndex, methodIndex } = buildClassIndex(csFiles, repoPath);
   console.log(`✅ Found ${Object.keys(classIndex).length} types and ${Object.keys(methodIndex).length} methods across ${totalFiles} files\n`);
 
   const results = [];

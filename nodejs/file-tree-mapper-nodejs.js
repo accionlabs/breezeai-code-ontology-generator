@@ -117,8 +117,7 @@ function getJsFiles(repoPath) {
 // Step 4: Analyze imports
 // -------------------------------------------------------------
 function analyzeImports(repoPath, mapper) {
-  console.log("strted woring*******************************")
-  const jsFiles = getJsFiles()
+  const jsFiles = getJsFiles(repoPath)
 
 
   const results = [];
