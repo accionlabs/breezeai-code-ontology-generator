@@ -26,7 +26,7 @@ Options:
   --api-key <key>         API key for the LLM provider
   --model <name>          Model name (default varies by provider)
   --api-url <url>         Custom API URL (for custom provider)
-  --aws-region <region>   AWS region for Bedrock (default: us-east-1)
+  --aws-region <region>   AWS region for Bedrock (default: us-west-2)
   --aws-access-key <key>  AWS access key ID for Bedrock
   --aws-secret-key <key>  AWS secret access key for Bedrock
   --max-concurrent <num>  Maximum concurrent API requests (default: 5)
@@ -48,7 +48,7 @@ Examples:
 
   # Using Amazon Bedrock
   node generate-file-descriptions.js ./perl-app ./output/tree.json \\
-    --provider bedrock --aws-region us-east-1 --aws-access-key AKIA... --aws-secret-key xxx
+    --provider bedrock --aws-region us-west-2 --aws-access-key AKIA... --aws-secret-key xxx
 
   # Using custom/private LLM
   node generate-file-descriptions.js ./perl-app ./output/tree.json \\
@@ -69,7 +69,7 @@ Examples:
     apiKey: null,
     model: null,
     apiUrl: null,
-    awsRegion: "us-east-1",
+    awsRegion: "us-west-2",
     awsAccessKey: null,
     awsSecretKey: null,
     maxConcurrent: 5,

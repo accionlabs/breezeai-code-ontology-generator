@@ -9,7 +9,7 @@
  *   --mode <low|high>           Accuracy mode: low (JSON only) or high (with code) [default: low]
  *   --model <model-name>        Model to use
  *   --api-url <url>             Custom API endpoint URL
- *   --aws-region <region>       AWS region for Bedrock (default: us-east-1)
+ *   --aws-region <region>       AWS region for Bedrock (default: us-west-2)
  *   --aws-access-key <key>      AWS access key ID for Bedrock
  *   --aws-secret-key <key>      AWS secret access key for Bedrock
  *   --max-concurrent <n>        Max concurrent requests [default: 3]
@@ -39,7 +39,7 @@ const config = {
   apiKey: getArg("--api-key"),
   model: getArg("--model"),
   apiUrl: getArg("--api-url"),
-  awsRegion: getArg("--aws-region", "us-east-1"),
+  awsRegion: getArg("--aws-region", "us-west-2"),
   awsAccessKey: getArg("--aws-access-key"),
   awsSecretKey: getArg("--aws-secret-key"),
   mode: getArg("--mode", "low"), // low or high accuracy

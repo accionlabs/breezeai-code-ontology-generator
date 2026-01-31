@@ -432,7 +432,7 @@ function generateDescriptions(mergedOutputPath, repoPath, args, verbose = false)
 
   // Add credentials based on provider
   if (provider === "bedrock") {
-    descCommand += ` --aws-region ${args["aws-region"] || "us-east-1"}`;
+    descCommand += ` --aws-region ${args["aws-region"] || "us-west-2"}`;
     descCommand += ` --aws-access-key ${args["aws-access-key"]}`;
     descCommand += ` --aws-secret-key ${args["aws-secret-key"]}`;
   } else if (args["api-key"]) {
@@ -485,7 +485,7 @@ function addMetadata(mergedOutputPath, repoPath, args, verbose = false) {
 
   // Add credentials based on provider
   if (provider === "bedrock") {
-    metadataCommand += ` --aws-region ${args["aws-region"] || "us-east-1"}`;
+    metadataCommand += ` --aws-region ${args["aws-region"] || "us-west-2"}`;
     metadataCommand += ` --aws-access-key ${args["aws-access-key"]}`;
     metadataCommand += ` --aws-secret-key ${args["aws-secret-key"]}`;
   } else if (args["api-key"]) {

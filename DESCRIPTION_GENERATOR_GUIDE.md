@@ -82,7 +82,7 @@ node generate-file-descriptions.js ./my-repo ./output/tree.json \
 ```bash
 node generate-file-descriptions.js ./my-repo ./output/tree.json \
   --provider bedrock \
-  --aws-region us-east-1 \
+  --aws-region us-west-2 \
   --aws-access-key AKIAXXXXXXXXXXXXXXXX \
   --aws-secret-key xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
   --model anthropic.claude-3-5-sonnet-20241022-v2:0
@@ -336,7 +336,7 @@ export ANTHROPIC_API_KEY=sk-ant-xxx
 export GEMINI_API_KEY=AIzaSy-xxx
 export AWS_ACCESS_KEY_ID=AKIA-xxx
 export AWS_SECRET_ACCESS_KEY=xxx
-export AWS_REGION=us-east-1
+export AWS_REGION=us-west-2
 
 # Then modify the script to read from these vars
 ```
