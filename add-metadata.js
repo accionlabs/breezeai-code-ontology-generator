@@ -219,7 +219,9 @@ async function callBedrock(prompt) {
   const secretKey = config.awsSecretKey;
 
   const host = `bedrock-runtime.${region}.amazonaws.com`;
-  const path = `/model/${encodeURIComponent(modelId)}/invoke`;
+  const path = `/model/${modelId}/invoke`;
+  // URI-encode the path for canonical request (AWS requires this)
+  const canonicalUri = `/model/${encodeURIComponent(modelId)}/invoke`;
 
   // Build request body based on model type
   let body;
@@ -283,7 +285,7 @@ async function callBedrock(prompt) {
 
   const canonicalRequest = [
     method,
-    path,
+    canonicalUri,
     "", // query string
     canonicalHeaders,
     signedHeaders,

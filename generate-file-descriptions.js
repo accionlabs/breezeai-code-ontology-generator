@@ -432,7 +432,10 @@ class BedrockProvider extends LLMProvider {
     const secretKey = this.config.awsSecretKey;
 
     const host = `bedrock-runtime.${region}.amazonaws.com`;
-    const endpoint = `https://${host}/model/${encodeURIComponent(modelId)}/invoke`;
+    const path = `/model/${modelId}/invoke`;
+    // URI-encode the path for canonical request (AWS requires this)
+    const canonicalUri = `/model/${encodeURIComponent(modelId)}/invoke`;
+    const endpoint = `https://${host}${path}`;
 
     // Build request body based on model type
     let body;
@@ -492,7 +495,6 @@ class BedrockProvider extends LLMProvider {
     const date = datetime.substring(0, 8);
     const service = "bedrock";
     const method = "POST";
-    const path = `/model/${encodeURIComponent(modelId)}/invoke`;
 
     const headers = {
       "Content-Type": "application/json",
@@ -511,7 +513,7 @@ class BedrockProvider extends LLMProvider {
 
     const canonicalRequest = [
       method,
-      path,
+      canonicalUri,
       "", // query string
       canonicalHeaders,
       signedHeaders,
