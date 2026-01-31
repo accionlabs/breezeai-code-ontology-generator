@@ -410,7 +410,15 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
 // Generate descriptions for merged output
 // ----------------------------
 function generateDescriptions(mergedOutputPath, repoPath, args, verbose = false) {
-  if (!args["api-key"]) {
+  const provider = args.provider || "openai";
+
+  // Validate credentials based on provider
+  if (provider === "bedrock") {
+    if (!args["aws-access-key"] || !args["aws-secret-key"]) {
+      console.error("❌ Error: --aws-access-key and --aws-secret-key are required for bedrock provider");
+      return false;
+    }
+  } else if (!args["api-key"] && provider !== "custom") {
     console.error("❌ Error: --api-key is required for --generate-descriptions");
     return false;
   }
@@ -420,8 +428,16 @@ function generateDescriptions(mergedOutputPath, repoPath, args, verbose = false)
   const descScriptPath = path.resolve(__dirname, "generate-file-descriptions.js");
   let descCommand = `node "${descScriptPath}" "${repoPath}" "${mergedOutputPath}"`;
 
-  descCommand += ` --provider ${args.provider || "openai"}`;
-  descCommand += ` --api-key ${args["api-key"]}`;
+  descCommand += ` --provider ${provider}`;
+
+  // Add credentials based on provider
+  if (provider === "bedrock") {
+    descCommand += ` --aws-region ${args["aws-region"] || "us-east-1"}`;
+    descCommand += ` --aws-access-key ${args["aws-access-key"]}`;
+    descCommand += ` --aws-secret-key ${args["aws-secret-key"]}`;
+  } else if (args["api-key"]) {
+    descCommand += ` --api-key ${args["api-key"]}`;
+  }
 
   if (args.model) descCommand += ` --model ${args.model}`;
   if (args["api-url"]) descCommand += ` --api-url ${args["api-url"]}`;
@@ -447,7 +463,15 @@ function generateDescriptions(mergedOutputPath, repoPath, args, verbose = false)
 // Add metadata for merged output
 // ----------------------------
 function addMetadata(mergedOutputPath, repoPath, args, verbose = false) {
-  if (!args["api-key"]) {
+  const provider = args.provider || "openai";
+
+  // Validate credentials based on provider
+  if (provider === "bedrock") {
+    if (!args["aws-access-key"] || !args["aws-secret-key"]) {
+      console.error("❌ Error: --aws-access-key and --aws-secret-key are required for bedrock provider");
+      return false;
+    }
+  } else if (!args["api-key"] && provider !== "custom") {
     console.error("❌ Error: --api-key is required for --add-metadata");
     return false;
   }
@@ -457,8 +481,16 @@ function addMetadata(mergedOutputPath, repoPath, args, verbose = false) {
   const metadataScriptPath = path.resolve(__dirname, "add-metadata.js");
   let metadataCommand = `node "${metadataScriptPath}" "${mergedOutputPath}" "${repoPath}"`;
 
-  metadataCommand += ` --provider ${args.provider || "openai"}`;
-  metadataCommand += ` --api-key ${args["api-key"]}`;
+  metadataCommand += ` --provider ${provider}`;
+
+  // Add credentials based on provider
+  if (provider === "bedrock") {
+    metadataCommand += ` --aws-region ${args["aws-region"] || "us-east-1"}`;
+    metadataCommand += ` --aws-access-key ${args["aws-access-key"]}`;
+    metadataCommand += ` --aws-secret-key ${args["aws-secret-key"]}`;
+  } else if (args["api-key"]) {
+    metadataCommand += ` --api-key ${args["api-key"]}`;
+  }
 
   if (args.model) metadataCommand += ` --model ${args.model}`;
   if (args["api-url"]) metadataCommand += ` --api-url ${args["api-url"]}`;

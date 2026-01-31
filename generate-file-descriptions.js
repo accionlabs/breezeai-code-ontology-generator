@@ -22,10 +22,13 @@ Required arguments:
   <treeJsonFile>     JSON file with file tree (will be updated in-place)
 
 Options:
-  --provider <name>       LLM provider: openai, claude, gemini, custom (default: openai)
+  --provider <name>       LLM provider: openai, claude, gemini, bedrock, custom (default: openai)
   --api-key <key>         API key for the LLM provider
   --model <name>          Model name (default varies by provider)
   --api-url <url>         Custom API URL (for custom provider)
+  --aws-region <region>   AWS region for Bedrock (default: us-east-1)
+  --aws-access-key <key>  AWS access key ID for Bedrock
+  --aws-secret-key <key>  AWS secret access key for Bedrock
   --max-concurrent <num>  Maximum concurrent API requests (default: 5)
   --max-file-size <kb>    Maximum file size in KB to process (default: 500)
   --help                  Show this help message
@@ -42,6 +45,10 @@ Examples:
   # Using Gemini
   node generate-file-descriptions.js ./perl-app ./output/tree.json \\
     --provider gemini --api-key xxx --model gemini-2.5-flash
+
+  # Using Amazon Bedrock
+  node generate-file-descriptions.js ./perl-app ./output/tree.json \\
+    --provider bedrock --aws-region us-east-1 --aws-access-key AKIA... --aws-secret-key xxx
 
   # Using custom/private LLM
   node generate-file-descriptions.js ./perl-app ./output/tree.json \\
@@ -62,6 +69,9 @@ Examples:
     apiKey: null,
     model: null,
     apiUrl: null,
+    awsRegion: "us-east-1",
+    awsAccessKey: null,
+    awsSecretKey: null,
     maxConcurrent: 5,
     maxFileSizeKB: 500,
   };
@@ -87,6 +97,15 @@ Examples:
       case "--max-file-size":
         config.maxFileSizeKB = parseInt(args[++i], 10);
         break;
+      case "--aws-region":
+        config.awsRegion = args[++i];
+        break;
+      case "--aws-access-key":
+        config.awsAccessKey = args[++i];
+        break;
+      case "--aws-secret-key":
+        config.awsSecretKey = args[++i];
+        break;
     }
   }
 
@@ -96,13 +115,19 @@ Examples:
       openai: "gpt-4o-mini",
       claude: "claude-3-5-sonnet-20241022",
       gemini: "gemini-2.5-flash",
+      bedrock: "anthropic.claude-3-5-sonnet-20241022-v2:0",
       custom: "custom-model",
     };
     config.model = defaultModels[config.provider] || "gpt-4o-mini";
   }
 
   // Validate required fields
-  if (!config.apiKey) {
+  if (config.provider === "bedrock") {
+    if (!config.awsAccessKey || !config.awsSecretKey) {
+      console.error("❌ Error: --aws-access-key and --aws-secret-key are required for bedrock provider");
+      process.exit(1);
+    }
+  } else if (!config.apiKey) {
     console.error("❌ Error: --api-key is required");
     process.exit(1);
   }
@@ -396,6 +421,203 @@ class CustomProvider extends LLMProvider {
   }
 }
 
+class BedrockProvider extends LLMProvider {
+  async generateDescriptions(filePath, fileContent, fileData) {
+    const crypto = require("crypto");
+    const https = require("https");
+
+    const region = this.config.awsRegion;
+    const modelId = this.config.model;
+    const accessKey = this.config.awsAccessKey;
+    const secretKey = this.config.awsSecretKey;
+
+    const host = `bedrock-runtime.${region}.amazonaws.com`;
+    const endpoint = `https://${host}/model/${encodeURIComponent(modelId)}/invoke`;
+
+    // Build request body based on model type
+    let body;
+    if (modelId.startsWith("anthropic.")) {
+      // Anthropic Claude models on Bedrock
+      body = JSON.stringify({
+        anthropic_version: "bedrock-2023-05-31",
+        max_tokens: 2000,
+        temperature: 0.3,
+        messages: [
+          {
+            role: "user",
+            content: this.createPrompt(filePath, fileContent, fileData),
+          },
+        ],
+      });
+    } else if (modelId.startsWith("amazon.titan")) {
+      // Amazon Titan models
+      body = JSON.stringify({
+        inputText: this.createPrompt(filePath, fileContent, fileData),
+        textGenerationConfig: {
+          maxTokenCount: 2000,
+          temperature: 0.3,
+        },
+      });
+    } else if (modelId.startsWith("meta.llama")) {
+      // Meta Llama models on Bedrock
+      body = JSON.stringify({
+        prompt: this.createPrompt(filePath, fileContent, fileData),
+        max_gen_len: 2000,
+        temperature: 0.3,
+      });
+    } else if (modelId.startsWith("mistral.")) {
+      // Mistral models on Bedrock
+      body = JSON.stringify({
+        prompt: `<s>[INST] ${this.createPrompt(filePath, fileContent, fileData)} [/INST]`,
+        max_tokens: 2000,
+        temperature: 0.3,
+      });
+    } else {
+      // Default to Anthropic format
+      body = JSON.stringify({
+        anthropic_version: "bedrock-2023-05-31",
+        max_tokens: 2000,
+        temperature: 0.3,
+        messages: [
+          {
+            role: "user",
+            content: this.createPrompt(filePath, fileContent, fileData),
+          },
+        ],
+      });
+    }
+
+    // AWS Signature Version 4 signing
+    const datetime = new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
+    const date = datetime.substring(0, 8);
+    const service = "bedrock";
+    const method = "POST";
+    const path = `/model/${encodeURIComponent(modelId)}/invoke`;
+
+    const headers = {
+      "Content-Type": "application/json",
+      "Host": host,
+      "X-Amz-Date": datetime,
+    };
+
+    // Create canonical request
+    const signedHeaders = Object.keys(headers).map(k => k.toLowerCase()).sort().join(";");
+    const canonicalHeaders = Object.keys(headers)
+      .map(k => `${k.toLowerCase()}:${headers[k].trim()}`)
+      .sort()
+      .join("\n") + "\n";
+
+    const payloadHash = crypto.createHash("sha256").update(body).digest("hex");
+
+    const canonicalRequest = [
+      method,
+      path,
+      "", // query string
+      canonicalHeaders,
+      signedHeaders,
+      payloadHash,
+    ].join("\n");
+
+    // Create string to sign
+    const algorithm = "AWS4-HMAC-SHA256";
+    const credentialScope = `${date}/${region}/${service}/aws4_request`;
+    const stringToSign = [
+      algorithm,
+      datetime,
+      credentialScope,
+      crypto.createHash("sha256").update(canonicalRequest).digest("hex"),
+    ].join("\n");
+
+    // Calculate signature
+    const getSignatureKey = (key, dateStamp, regionName, serviceName) => {
+      const kDate = crypto.createHmac("sha256", `AWS4${key}`).update(dateStamp).digest();
+      const kRegion = crypto.createHmac("sha256", kDate).update(regionName).digest();
+      const kService = crypto.createHmac("sha256", kRegion).update(serviceName).digest();
+      const kSigning = crypto.createHmac("sha256", kService).update("aws4_request").digest();
+      return kSigning;
+    };
+
+    const signingKey = getSignatureKey(secretKey, date, region, service);
+    const signature = crypto.createHmac("sha256", signingKey).update(stringToSign).digest("hex");
+
+    // Create authorization header
+    const authorizationHeader = `${algorithm} Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+    headers["Authorization"] = authorizationHeader;
+
+    // Make request
+    const response = await this.makeBedrockRequest(endpoint, headers, body);
+
+    // Parse response based on model type
+    let content;
+    if (modelId.startsWith("anthropic.")) {
+      content = response.content[0].text.trim();
+    } else if (modelId.startsWith("amazon.titan")) {
+      content = response.results[0].outputText.trim();
+    } else if (modelId.startsWith("meta.llama")) {
+      content = response.generation.trim();
+    } else if (modelId.startsWith("mistral.")) {
+      content = response.outputs[0].text.trim();
+    } else {
+      // Default to Anthropic format
+      content = response.content[0].text.trim();
+    }
+
+    // Remove markdown code blocks if present
+    const jsonContent = content.replace(/```json\n?/g, "").replace(/```\n?/g, "");
+    return JSON.parse(jsonContent);
+  }
+
+  async makeBedrockRequest(url, headers, body) {
+    const https = require("https");
+    const urlModule = require("url");
+
+    const parsedUrl = urlModule.parse(url);
+
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: parsedUrl.hostname,
+        path: parsedUrl.path,
+        method: "POST",
+        headers: headers,
+      };
+
+      const req = https.request(options, (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          const statusCode = res.statusCode;
+
+          try {
+            let parsed;
+            try {
+              parsed = JSON.parse(data);
+            } catch (e) {
+              parsed = { error: { message: data } };
+            }
+
+            if (statusCode < 200 || statusCode >= 300) {
+              const errorMessage = parsed.message || parsed.error?.message || `HTTP ${statusCode}`;
+              reject(new APIError(`Bedrock API error: ${errorMessage}`, statusCode, false, false));
+              return;
+            }
+
+            resolve(parsed);
+          } catch (e) {
+            reject(new Error(`Failed to process Bedrock response: ${e.message}`));
+          }
+        });
+      });
+
+      req.on("error", (err) => {
+        reject(new APIError(`Network error: ${err.message}`, 0, false, false));
+      });
+
+      req.write(body);
+      req.end();
+    });
+  }
+}
+
 // Factory function to create the appropriate provider
 function createProvider(config) {
   switch (config.provider.toLowerCase()) {
@@ -405,6 +627,8 @@ function createProvider(config) {
       return new ClaudeProvider(config);
     case "gemini":
       return new GeminiProvider(config);
+    case "bedrock":
+      return new BedrockProvider(config);
     case "custom":
       return new CustomProvider(config);
     default:

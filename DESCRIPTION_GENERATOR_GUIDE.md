@@ -8,7 +8,7 @@ The `generate-file-descriptions.js` script uses AI to automatically generate nat
 
 - **Direct Repository Scanning**: Reads files directly from the folder (no need for pre-generated JSON)
 - **In-Place Updates**: Updates the JSON file incrementally (preserves existing data)
-- **Multiple LLM Providers**: OpenAI, Claude (Anthropic), Google Gemini, and custom endpoints
+- **Multiple LLM Providers**: OpenAI, Claude (Anthropic), Google Gemini, Amazon Bedrock, and custom endpoints
 - **Concurrent Processing**: Process multiple files in parallel with rate limiting
 - **File Size Filtering**: Skip files that are too large to process efficiently
 - **Smart Skip Logic**: Skips files that already have descriptions
@@ -77,7 +77,35 @@ node generate-file-descriptions.js ./my-repo ./output/tree.json \
 
 ---
 
-### 4. Custom/Private LLM
+### 4. Amazon Bedrock
+
+```bash
+node generate-file-descriptions.js ./my-repo ./output/tree.json \
+  --provider bedrock \
+  --aws-region us-east-1 \
+  --aws-access-key AKIAXXXXXXXXXXXXXXXX \
+  --aws-secret-key xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
+  --model anthropic.claude-3-5-sonnet-20241022-v2:0
+```
+
+**Available Models:**
+- `anthropic.claude-3-5-sonnet-20241022-v2:0` - Claude 3.5 Sonnet (recommended, default)
+- `anthropic.claude-3-5-haiku-20241022-v1:0` - Claude 3.5 Haiku (faster, cheaper)
+- `anthropic.claude-3-opus-20240229-v1:0` - Claude 3 Opus (most capable)
+- `amazon.titan-text-express-v1` - Amazon Titan Text Express
+- `meta.llama3-70b-instruct-v1:0` - Meta Llama 3 70B
+- `mistral.mistral-large-2407-v1:0` - Mistral Large
+
+**AWS Credentials:**
+- Create IAM user with `bedrock:InvokeModel` permission
+- Get access key and secret key from AWS IAM Console
+- Ensure the model is enabled in your AWS Bedrock console
+
+**Regions:** Bedrock is available in: `us-east-1`, `us-west-2`, `eu-west-1`, `ap-northeast-1`, etc.
+
+---
+
+### 5. Custom/Private LLM
 
 For self-hosted models (Ollama, vLLM, LocalAI, etc.):
 
@@ -228,6 +256,8 @@ Approximate costs per 1000 files (average 200 lines each):
 | Claude | haiku | $0.50 - $2.00 |
 | Claude | sonnet | $2.00 - $8.00 |
 | Gemini | flash | $0.10 - $0.50 |
+| Bedrock | Claude haiku | $0.50 - $2.00 |
+| Bedrock | Claude sonnet | $2.00 - $8.00 |
 | Custom | local | $0.00 (free) |
 
 *Estimates vary based on file size and complexity*
@@ -304,6 +334,9 @@ Instead of passing API keys on the command line, you can use environment variabl
 export OPENAI_API_KEY=sk-proj-xxx
 export ANTHROPIC_API_KEY=sk-ant-xxx
 export GEMINI_API_KEY=AIzaSy-xxx
+export AWS_ACCESS_KEY_ID=AKIA-xxx
+export AWS_SECRET_ACCESS_KEY=xxx
+export AWS_REGION=us-east-1
 
 # Then modify the script to read from these vars
 ```

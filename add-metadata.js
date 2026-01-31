@@ -3,12 +3,15 @@
  * Add metadata to output.json using LLM analysis
  *
  * Usage:
- *   node add-metadata.js <output.json> <repoPath> --provider <openai|claude|gemini|custom> --api-key <key> [options]
+ *   node add-metadata.js <output.json> <repoPath> --provider <openai|claude|gemini|bedrock|custom> --api-key <key> [options]
  *
  * Options:
  *   --mode <low|high>           Accuracy mode: low (JSON only) or high (with code) [default: low]
  *   --model <model-name>        Model to use
  *   --api-url <url>             Custom API endpoint URL
+ *   --aws-region <region>       AWS region for Bedrock (default: us-east-1)
+ *   --aws-access-key <key>      AWS access key ID for Bedrock
+ *   --aws-secret-key <key>      AWS secret access key for Bedrock
  *   --max-concurrent <n>        Max concurrent requests [default: 3]
  *   --node-types <types>        Comma-separated: file,class,function [default: all]
  */
@@ -17,6 +20,7 @@ const fs = require("fs");
 const path = require("path");
 const https = require("https");
 const http = require("http");
+const crypto = require("crypto");
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -35,6 +39,9 @@ const config = {
   apiKey: getArg("--api-key"),
   model: getArg("--model"),
   apiUrl: getArg("--api-url"),
+  awsRegion: getArg("--aws-region", "us-east-1"),
+  awsAccessKey: getArg("--aws-access-key"),
+  awsSecretKey: getArg("--aws-secret-key"),
   mode: getArg("--mode", "low"), // low or high accuracy
   maxConcurrent: parseInt(getArg("--max-concurrent", "3")),
   nodeTypes: getArg("--node-types", "file,class,function").split(",")
@@ -46,12 +53,18 @@ if (!config.model) {
     openai: "gpt-4o-mini",
     claude: "claude-3-5-haiku-20241022",
     gemini: "gemini-2.5-flash",
+    bedrock: "anthropic.claude-3-5-sonnet-20241022-v2:0",
     custom: "llama3.2"
   };
   config.model = defaultModels[config.provider] || "gpt-4o-mini";
 }
 
-if (!config.apiKey && config.provider !== "custom") {
+if (config.provider === "bedrock") {
+  if (!config.awsAccessKey || !config.awsSecretKey) {
+    console.error("Error: --aws-access-key and --aws-secret-key are required for bedrock provider");
+    process.exit(1);
+  }
+} else if (!config.apiKey && config.provider !== "custom") {
   console.error("Error: --api-key is required");
   process.exit(1);
 }
@@ -105,6 +118,8 @@ async function callLLM(prompt) {
       return await callClaude(prompt);
     case "gemini":
       return await callGemini(prompt);
+    case "bedrock":
+      return await callBedrock(prompt);
     case "custom":
       return await callCustom(prompt);
     default:
@@ -195,6 +210,174 @@ async function callCustom(prompt) {
       ...(config.apiKey ? { "Authorization": `Bearer ${config.apiKey}` } : {})
     }
   }, body);
+}
+
+async function callBedrock(prompt) {
+  const region = config.awsRegion;
+  const modelId = config.model;
+  const accessKey = config.awsAccessKey;
+  const secretKey = config.awsSecretKey;
+
+  const host = `bedrock-runtime.${region}.amazonaws.com`;
+  const path = `/model/${encodeURIComponent(modelId)}/invoke`;
+
+  // Build request body based on model type
+  let body;
+  if (modelId.startsWith("anthropic.")) {
+    body = JSON.stringify({
+      anthropic_version: "bedrock-2023-05-31",
+      max_tokens: 4096,
+      temperature: 0.1,
+      messages: [{ role: "user", content: prompt }],
+    });
+  } else if (modelId.startsWith("amazon.titan")) {
+    body = JSON.stringify({
+      inputText: prompt,
+      textGenerationConfig: {
+        maxTokenCount: 4096,
+        temperature: 0.1,
+      },
+    });
+  } else if (modelId.startsWith("meta.llama")) {
+    body = JSON.stringify({
+      prompt: prompt,
+      max_gen_len: 4096,
+      temperature: 0.1,
+    });
+  } else if (modelId.startsWith("mistral.")) {
+    body = JSON.stringify({
+      prompt: `<s>[INST] ${prompt} [/INST]`,
+      max_tokens: 4096,
+      temperature: 0.1,
+    });
+  } else {
+    // Default to Anthropic format
+    body = JSON.stringify({
+      anthropic_version: "bedrock-2023-05-31",
+      max_tokens: 4096,
+      temperature: 0.1,
+      messages: [{ role: "user", content: prompt }],
+    });
+  }
+
+  // AWS Signature Version 4 signing
+  const datetime = new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const date = datetime.substring(0, 8);
+  const service = "bedrock";
+  const method = "POST";
+
+  const headers = {
+    "Content-Type": "application/json",
+    "Host": host,
+    "X-Amz-Date": datetime,
+  };
+
+  // Create canonical request
+  const signedHeaders = Object.keys(headers).map(k => k.toLowerCase()).sort().join(";");
+  const canonicalHeaders = Object.keys(headers)
+    .map(k => `${k.toLowerCase()}:${headers[k].trim()}`)
+    .sort()
+    .join("\n") + "\n";
+
+  const payloadHash = crypto.createHash("sha256").update(body).digest("hex");
+
+  const canonicalRequest = [
+    method,
+    path,
+    "", // query string
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash,
+  ].join("\n");
+
+  // Create string to sign
+  const algorithm = "AWS4-HMAC-SHA256";
+  const credentialScope = `${date}/${region}/${service}/aws4_request`;
+  const stringToSign = [
+    algorithm,
+    datetime,
+    credentialScope,
+    crypto.createHash("sha256").update(canonicalRequest).digest("hex"),
+  ].join("\n");
+
+  // Calculate signature
+  const getSignatureKey = (key, dateStamp, regionName, serviceName) => {
+    const kDate = crypto.createHmac("sha256", `AWS4${key}`).update(dateStamp).digest();
+    const kRegion = crypto.createHmac("sha256", kDate).update(regionName).digest();
+    const kService = crypto.createHmac("sha256", kRegion).update(serviceName).digest();
+    const kSigning = crypto.createHmac("sha256", kService).update("aws4_request").digest();
+    return kSigning;
+  };
+
+  const signingKey = getSignatureKey(secretKey, date, region, service);
+  const signature = crypto.createHmac("sha256", signingKey).update(stringToSign).digest("hex");
+
+  // Create authorization header
+  const authorizationHeader = `${algorithm} Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  headers["Authorization"] = authorizationHeader;
+
+  // Make request
+  return await makeBedrockRequest(host, path, headers, body, modelId);
+}
+
+async function makeBedrockRequest(host, path, headers, body, modelId) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: host,
+      path: path,
+      method: "POST",
+      headers: headers,
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        const statusCode = res.statusCode;
+
+        try {
+          let parsed;
+          try {
+            parsed = JSON.parse(data);
+          } catch (e) {
+            parsed = { error: { message: data } };
+          }
+
+          if (statusCode < 200 || statusCode >= 300) {
+            const errorMessage = parsed.message || parsed.error?.message || `HTTP ${statusCode}`;
+            reject(new APIError(`Bedrock API error: ${errorMessage}`, statusCode, false, false));
+            return;
+          }
+
+          // Parse response based on model type
+          let content;
+          if (modelId.startsWith("anthropic.")) {
+            content = parsed.content[0].text;
+          } else if (modelId.startsWith("amazon.titan")) {
+            content = parsed.results[0].outputText;
+          } else if (modelId.startsWith("meta.llama")) {
+            content = parsed.generation;
+          } else if (modelId.startsWith("mistral.")) {
+            content = parsed.outputs[0].text;
+          } else {
+            // Default to Anthropic format
+            content = parsed.content[0].text;
+          }
+
+          resolve(content);
+        } catch (e) {
+          reject(new Error(`Failed to process Bedrock response: ${e.message}`));
+        }
+      });
+    });
+
+    req.on("error", (err) => {
+      reject(new APIError(`Network error: ${err.message}`, 0, false, false));
+    });
+
+    req.write(body);
+    req.end();
+  });
 }
 
 // Custom error class for API errors

@@ -43,10 +43,13 @@ if (!repoPath || !outputDir) {
       `  --language <name>          Language to analyze: perl, javascript, python, java, typescript (optional)\n` +
       `  --generate-descriptions     Generate AI descriptions for files, classes, and functions\n` +
       `  --add-metadata             Add metadata using LLM analysis\n` +
-      `  --provider <name>          LLM provider: openai, claude, gemini, custom (default: openai)\n` +
+      `  --provider <name>          LLM provider: openai, claude, gemini, bedrock, custom (default: openai)\n` +
       `  --api-key <key>            API key for LLM provider\n` +
       `  --model <name>             Model name (optional)\n` +
       `  --api-url <url>            Custom API URL (for custom provider)\n` +
+      `  --aws-region <region>      AWS region for Bedrock (default: us-east-1)\n` +
+      `  --aws-access-key <key>     AWS access key ID for Bedrock\n` +
+      `  --aws-secret-key <key>     AWS secret access key for Bedrock\n` +
       `  --mode <low|high>          Accuracy mode for metadata (default: low)\n` +
       `  --max-concurrent <num>     Max concurrent API requests (default: 5 for descriptions, 3 for metadata)\n` +
       `  --verbose                  Show detailed processing information\n`
