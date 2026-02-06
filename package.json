@@ -7,11 +7,13 @@
     "generate-tree": "node index.js",
     "generate-descriptions": "node generate-file-descriptions.js",
     "add-metadata": "node add-metadata.js",
+    "upload-docs": "node upload-docs.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "postinstall": "node install-safe.js"
   },
   "bin": {
-    "repo-to-json-tree": "./index.js"
+    "repo-to-json-tree": "./index.js",
+    "upload-docs": "./upload-docs.js"
   },
   "keywords": [
     "code-analysis",
