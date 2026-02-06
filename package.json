@@ -40,6 +40,14 @@
     "typescript": "^5.9.3",
     "web-tree-sitter": "^0.25.10"
   },
+  "overrides": {
+    "tree-sitter-perl": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-sfapex": {
+      "tree-sitter": "$tree-sitter"
+    }
+  },
   "devDependencies": {
     "patch-package": "^8.0.1"
   }
