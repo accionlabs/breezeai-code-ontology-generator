@@ -12,8 +12,7 @@
     "postinstall": "node install-safe.js"
   },
   "bin": {
-    "repo-to-json-tree": "./index.js",
-    "upload-docs": "./upload-docs.js"
+    "repo-to-json-tree": "./index.js"
   },
   "keywords": [
     "code-analysis",
