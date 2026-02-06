@@ -1,18 +1,18 @@
 {
   "name": "treesitter",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "cli.js",
   "scripts": {
-    "start": "node index.js",
-    "generate-tree": "node index.js",
+    "start": "node cli.js",
+    "generate-tree": "node cli.js repo-to-json-tree",
     "generate-descriptions": "node generate-file-descriptions.js",
     "add-metadata": "node add-metadata.js",
-    "upload-docs": "node upload-docs.js",
+    "upload-docs": "node cli.js upload-docs",
     "test": "echo \"Error: no test specified\" && exit 1",
     "postinstall": "node install-safe.js"
   },
   "bin": {
-    "repo-to-json-tree": "./index.js"
+    "breeze-code-ontology-generator": "./cli.js"
   },
   "keywords": [
     "code-analysis",
@@ -25,6 +25,7 @@
   "license": "ISC",
   "description": "Analyze codebases and generate JSON ontology with AI-powered descriptions and metadata for JavaScript, TypeScript, Python, Perl, Java, and C# projects",
   "dependencies": {
+    "commander": "^14.0.3",
     "glob": "^11.0.3",
     "minimist": "^1.2.8",
     "tree-sitter": "^0.25.0",
@@ -38,6 +39,14 @@
     "tree-sitter-typescript": "^0.23.2",
     "typescript": "^5.9.3",
     "web-tree-sitter": "^0.25.10"
+  },
+  "overrides": {
+    "tree-sitter-perl": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-sfapex": {
+      "tree-sitter": "$tree-sitter"
+    }
   },
   "devDependencies": {
     "patch-package": "^8.0.1"

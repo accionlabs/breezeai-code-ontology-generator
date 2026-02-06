@@ -409,16 +409,16 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
 // ----------------------------
 // Generate descriptions for merged output
 // ----------------------------
-function generateDescriptions(mergedOutputPath, repoPath, args, verbose = false) {
-  const provider = args.provider || "openai";
+function generateDescriptions(mergedOutputPath, repoPath, opts, verbose = false) {
+  const provider = opts.provider || "openai";
 
   // Validate credentials based on provider
   if (provider === "bedrock") {
-    if (!args["aws-access-key"] || !args["aws-secret-key"]) {
+    if (!opts.awsAccessKey || !opts.awsSecretKey) {
       console.error("❌ Error: --aws-access-key and --aws-secret-key are required for bedrock provider");
       return false;
     }
-  } else if (!args["api-key"] && provider !== "custom") {
+  } else if (!opts.apiKey && provider !== "custom") {
     console.error("❌ Error: --api-key is required for --generate-descriptions");
     return false;
   }
@@ -432,16 +432,16 @@ function generateDescriptions(mergedOutputPath, repoPath, args, verbose = false)
 
   // Add credentials based on provider
   if (provider === "bedrock") {
-    descCommand += ` --aws-region ${args["aws-region"] || "us-west-2"}`;
-    descCommand += ` --aws-access-key ${args["aws-access-key"]}`;
-    descCommand += ` --aws-secret-key ${args["aws-secret-key"]}`;
-  } else if (args["api-key"]) {
-    descCommand += ` --api-key ${args["api-key"]}`;
+    descCommand += ` --aws-region ${opts.awsRegion || "us-west-2"}`;
+    descCommand += ` --aws-access-key ${opts.awsAccessKey}`;
+    descCommand += ` --aws-secret-key ${opts.awsSecretKey}`;
+  } else if (opts.apiKey) {
+    descCommand += ` --api-key ${opts.apiKey}`;
   }
 
-  if (args.model) descCommand += ` --model ${args.model}`;
-  if (args["api-url"]) descCommand += ` --api-url ${args["api-url"]}`;
-  if (args["max-concurrent"]) descCommand += ` --max-concurrent ${args["max-concurrent"]}`;
+  if (opts.model) descCommand += ` --model ${opts.model}`;
+  if (opts.apiUrl) descCommand += ` --api-url ${opts.apiUrl}`;
+  if (opts.maxConcurrent) descCommand += ` --max-concurrent ${opts.maxConcurrent}`;
 
   try {
     if (verbose) {
@@ -462,16 +462,16 @@ function generateDescriptions(mergedOutputPath, repoPath, args, verbose = false)
 // ----------------------------
 // Add metadata for merged output
 // ----------------------------
-function addMetadata(mergedOutputPath, repoPath, args, verbose = false) {
-  const provider = args.provider || "openai";
+function addMetadata(mergedOutputPath, repoPath, opts, verbose = false) {
+  const provider = opts.provider || "openai";
 
   // Validate credentials based on provider
   if (provider === "bedrock") {
-    if (!args["aws-access-key"] || !args["aws-secret-key"]) {
+    if (!opts.awsAccessKey || !opts.awsSecretKey) {
       console.error("❌ Error: --aws-access-key and --aws-secret-key are required for bedrock provider");
       return false;
     }
-  } else if (!args["api-key"] && provider !== "custom") {
+  } else if (!opts.apiKey && provider !== "custom") {
     console.error("❌ Error: --api-key is required for --add-metadata");
     return false;
   }
@@ -485,17 +485,17 @@ function addMetadata(mergedOutputPath, repoPath, args, verbose = false) {
 
   // Add credentials based on provider
   if (provider === "bedrock") {
-    metadataCommand += ` --aws-region ${args["aws-region"] || "us-west-2"}`;
-    metadataCommand += ` --aws-access-key ${args["aws-access-key"]}`;
-    metadataCommand += ` --aws-secret-key ${args["aws-secret-key"]}`;
-  } else if (args["api-key"]) {
-    metadataCommand += ` --api-key ${args["api-key"]}`;
+    metadataCommand += ` --aws-region ${opts.awsRegion || "us-west-2"}`;
+    metadataCommand += ` --aws-access-key ${opts.awsAccessKey}`;
+    metadataCommand += ` --aws-secret-key ${opts.awsSecretKey}`;
+  } else if (opts.apiKey) {
+    metadataCommand += ` --api-key ${opts.apiKey}`;
   }
 
-  if (args.model) metadataCommand += ` --model ${args.model}`;
-  if (args["api-url"]) metadataCommand += ` --api-url ${args["api-url"]}`;
-  if (args.mode) metadataCommand += ` --mode ${args.mode}`;
-  if (args["max-concurrent"]) metadataCommand += ` --max-concurrent ${args["max-concurrent"]}`;
+  if (opts.model) metadataCommand += ` --model ${opts.model}`;
+  if (opts.apiUrl) metadataCommand += ` --api-url ${opts.apiUrl}`;
+  if (opts.mode) metadataCommand += ` --mode ${opts.mode}`;
+  if (opts.maxConcurrent) metadataCommand += ` --max-concurrent ${opts.maxConcurrent}`;
 
   try {
     if (verbose) {
@@ -516,8 +516,8 @@ function addMetadata(mergedOutputPath, repoPath, args, verbose = false) {
 // ----------------------------
 // Main auto-detect function
 // ----------------------------
-async function autoDetectAndProcess(repoPath, outputDir, args) {
-  const verbose = args.verbose || false;
+async function autoDetectAndProcess(repoPath, outputDir, opts) {
+  const verbose = opts.verbose || false;
 
   try {
     console.log("╔════════════════════════════════════════════════════════════╗");
@@ -569,13 +569,13 @@ async function autoDetectAndProcess(repoPath, outputDir, args) {
     const mergedOutputPath = mergeLanguageOutputs(results, repoPath, outputDir);
 
     // Step 4: Generate descriptions if requested
-    if (args["generate-descriptions"]) {
-      generateDescriptions(mergedOutputPath, repoPath, args, verbose);
+    if (opts.generateDescriptions) {
+      generateDescriptions(mergedOutputPath, repoPath, opts, verbose);
     }
 
     // Step 5: Add metadata if requested
-    if (args["add-metadata"]) {
-      addMetadata(mergedOutputPath, repoPath, args, verbose);
+    if (opts.addMetadata) {
+      addMetadata(mergedOutputPath, repoPath, opts, verbose);
     }
 
     // Summary
