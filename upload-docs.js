@@ -1,54 +1,12 @@
-#!/usr/bin/env node
-
-const minimist = require("minimist");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
 const http = require("http");
 const url = require("url");
 
-const args = minimist(process.argv.slice(2), {
-  alias: {
-    k: "api-key",
-    u: "uuid",
-    b: "baseurl",
-    p: "path",
-  },
-  string: ["api-key", "uuid", "baseurl", "path"],
-});
-
-function printUsage() {
-  console.error(
-    `Usage:\n` +
-    `  upload-docs --api-key <key> --uuid <uuid> --baseurl <url> --path <file-or-dir>\n\n` +
-    `Options:\n` +
-    `  --api-key, -k <key>       API key for authentication (required)\n` +
-    `  --uuid, -u <uuid>         UUID identifier (required)\n` +
-    `  --baseurl, -b <url>       Base URL of the API (required)\n` +
-    `  --path, -p <file-or-dir>  File or directory to upload (required)\n\n` +
-    `When a directory is provided, all files in it are uploaded.\n`
-  );
-}
-
-function validate() {
-  console.log("args:", args); // Debugging line to print parsed arguments 
-  const errors = [];
-  if (!args["api-key"]) errors.push("--api-key is required");
-  if (!args["uuid"]) errors.push("--uuid is required");
-  if (!args["baseurl"]) errors.push("--baseurl is required");
-  if (!args["path"]) errors.push("--path is required");
-
-  if (errors.length > 0) {
-    errors.forEach((e) => console.error(`Error: ${e}`));
-    console.error("");
-    printUsage();
-    process.exit(1);
-  }
-}
-
-function resolveFiles() {
+function resolveFiles(targetInput) {
   const files = [];
-  const targetPath = path.resolve(args["path"]);
+  const targetPath = path.resolve(targetInput);
 
   if (!fs.existsSync(targetPath)) {
     console.error(`Path not found: ${targetPath}`);
@@ -83,23 +41,9 @@ function getMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const mimeTypes = {
     '.pdf': 'application/pdf',
-    '.doc': 'application/msword',
-    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    '.xls': 'application/vnd.ms-excel',
-    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    '.ppt': 'application/vnd.ms-powerpoint',
-    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     '.txt': 'text/plain',
-    '.csv': 'text/csv',
-    '.json': 'application/json',
-    '.xml': 'application/xml',
-    '.html': 'text/html',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.svg': 'image/svg+xml',
-    '.zip': 'application/zip',
     '.md': 'text/markdown',
   };
   return mimeTypes[ext] || 'application/octet-stream';
@@ -189,13 +133,11 @@ function uploadFile(filePath, apiKey, uuid, baseurl) {
   });
 }
 
-async function main() {
-  validate();
-
-  const apiKey = args["api-key"];
-  const uuid = args["uuid"];
-  const baseurl = args["baseurl"];
-  const files = resolveFiles();
+async function run(opts) {
+  const apiKey = opts.apiKey;
+  const uuid = opts.uuid;
+  const baseurl = opts.baseurl;
+  const files = resolveFiles(opts.path);
 
   console.log(`\nUploading ${files.length} file(s) to ${baseurl}/documents/upload\n`);
 
@@ -223,12 +165,4 @@ async function main() {
   }
 }
 
-// Allow running standalone or importing
-if (require.main === module) {
-  main().catch((err) => {
-    console.error("Error:", err.message);
-    process.exit(1);
-  });
-}
-
-module.exports = { uploadFile, resolveFiles };
+module.exports = { run, uploadFile, resolveFiles };
