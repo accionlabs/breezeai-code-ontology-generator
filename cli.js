@@ -19,7 +19,6 @@ program
   .option("--generate-descriptions", "Generate AI descriptions for files, classes, and functions", false)
   .option("--add-metadata", "Add metadata using LLM analysis", false)
   .option("--provider <name>", "LLM provider: openai, claude, gemini, bedrock, custom (default: openai)")
-  .option("--api-key <key>", "API key for LLM provider")
   .option("--model <name>", "Model name")
   .option("--api-url <url>", "Custom API URL (for custom provider)")
   .option("--aws-region <region>", "AWS region for Bedrock (default: us-west-2)")
@@ -28,7 +27,21 @@ program
   .option("--mode <low|high>", "Accuracy mode for metadata (default: low)")
   .option("--max-concurrent <num>", "Max concurrent API requests (default: 5 for descriptions, 3 for metadata)")
   .option("--verbose", "Show detailed processing information", false)
+  .option("--user-api-key <key>", "API key for authentication")
+  .option("--upload", "Upload generated files to the API after processing")
+  .option("--baseurl <url>", "Base URL of the API (required with --upload)")
+  .option("--uuid <uuid>", "UUID identifier (required with --upload)")
   .action(async (opts) => {
+    if (opts.upload) {
+      const missing = [];
+      if (!opts.baseurl) missing.push("--baseurl");
+      if (!opts.uuid) missing.push("--uuid");
+      if (!opts.userApiKey) missing.push("--user-api-key");
+      if (missing.length > 0) {
+        console.error(`error: missing required options when --upload is used: ${missing.join(", ")}`);
+        process.exit(1);
+      }
+    }
     const { run } = require("./index");
     await run(opts);
   });
@@ -37,7 +50,7 @@ program
 program
   .command("upload-docs")
   .description("Upload documents to the API. Accepts a single file or a directory.")
-  .requiredOption("-k, --api-key <key>", "API key for authentication")
+  .requiredOption("-k, --user-api-key <key>", "API key for authentication")
   .requiredOption("-u, --uuid <uuid>", "UUID identifier")
   .requiredOption("-b, --baseurl <url>", "Base URL of the API")
   .requiredOption("-p, --path <file-or-dir>", "File or directory to upload")

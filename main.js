@@ -432,7 +432,7 @@ function generateDescriptions(mergedOutputPath, repoPath, opts, verbose = false)
       console.error("❌ Error: --aws-access-key and --aws-secret-key are required for bedrock provider");
       return false;
     }
-  } else if (!opts.apiKey && provider !== "custom") {
+  } else if (!opts.userApiKey && provider !== "custom") {
     console.error("❌ Error: --api-key is required for --generate-descriptions");
     return false;
   }
@@ -449,8 +449,8 @@ function generateDescriptions(mergedOutputPath, repoPath, opts, verbose = false)
     descCommand += ` --aws-region ${opts.awsRegion || "us-west-2"}`;
     descCommand += ` --aws-access-key ${opts.awsAccessKey}`;
     descCommand += ` --aws-secret-key ${opts.awsSecretKey}`;
-  } else if (opts.apiKey) {
-    descCommand += ` --api-key ${opts.apiKey}`;
+  } else if (opts.userApiKey) {
+    descCommand += ` --api-key ${opts.userApiKey}`;
   }
 
   if (opts.model) descCommand += ` --model ${opts.model}`;
@@ -485,7 +485,7 @@ function addMetadata(mergedOutputPath, repoPath, opts, verbose = false) {
       console.error("❌ Error: --aws-access-key and --aws-secret-key are required for bedrock provider");
       return false;
     }
-  } else if (!opts.apiKey && provider !== "custom") {
+  } else if (!opts.userApiKey && provider !== "custom") {
     console.error("❌ Error: --api-key is required for --add-metadata");
     return false;
   }
@@ -502,8 +502,8 @@ function addMetadata(mergedOutputPath, repoPath, opts, verbose = false) {
     metadataCommand += ` --aws-region ${opts.awsRegion || "us-west-2"}`;
     metadataCommand += ` --aws-access-key ${opts.awsAccessKey}`;
     metadataCommand += ` --aws-secret-key ${opts.awsSecretKey}`;
-  } else if (opts.apiKey) {
-    metadataCommand += ` --api-key ${opts.apiKey}`;
+  } else if (opts.userApiKey) {
+    metadataCommand += ` --api-key ${opts.userApiKey}`;
   }
 
   if (opts.model) metadataCommand += ` --model ${opts.model}`;

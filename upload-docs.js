@@ -134,7 +134,7 @@ function uploadFile(filePath, apiKey, uuid, baseurl) {
 }
 
 async function run(opts) {
-  const apiKey = opts.apiKey;
+  const apiKey = opts.userApiKey;
   const uuid = opts.uuid;
   const baseurl = opts.baseurl;
   const files = resolveFiles(opts.path);
