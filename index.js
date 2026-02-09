@@ -1,6 +1,9 @@
 const { execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const https = require("https");
+const http = require("http");
+const url = require("url");
 const { autoDetectAndProcess, generateDescriptions, addMetadata } = require("./main");
 
 const allowedLanguages = ["perl", "javascript", "python", "java", "typescript"];
@@ -21,6 +24,10 @@ async function run(opts) {
     const result = await autoDetectAndProcess(repoPath, outputDir, opts);
     if (!result.success) {
       process.exit(1);
+    }
+
+    if (opts.upload) {
+      await uploadGeneratedFiles(outputDir, opts);
     }
     return;
   }
@@ -75,10 +82,144 @@ async function run(opts) {
       addMetadata(importsOutput, repoPath, opts, opts.verbose);
     }
 
+    if (opts.upload) {
+      await uploadGeneratedFiles(outputDir, opts);
+    }
+
     console.log("\n🎉 All tasks completed successfully!");
     console.log("📄 Final output:", importsOutput);
   } catch (err) {
     console.error("❌ Failed:", err.message);
+    process.exit(1);
+  }
+}
+
+function uploadToGenerate(filePath, apiKey, projectUuid, baseurl) {
+  return new Promise((resolve, reject) => {
+    const boundary = `----FormBoundary${Date.now().toString(16)}`;
+    const fileContent = fs.readFileSync(filePath);
+    const fileName = path.basename(filePath);
+
+    // Read JSON to extract name from projectMetaData
+    let name = fileName;
+    try {
+      const json = JSON.parse(fileContent.toString("utf-8"));
+      if (json?.projectMetaData?.repositoryName) {
+        name = json.projectMetaData.repositoryName;
+      }
+    } catch { }
+
+    const parts = [];
+
+    // file field
+    parts.push(
+      Buffer.from(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
+        `Content-Type: application/json\r\n\r\n`
+      )
+    );
+    parts.push(fileContent);
+    parts.push(Buffer.from(`\r\n`));
+
+    // projectUuid field
+    parts.push(
+      Buffer.from(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="projectUuid"\r\n\r\n` +
+        `${projectUuid}\r\n`
+      )
+    );
+
+    // name field
+    parts.push(
+      Buffer.from(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="name"\r\n\r\n` +
+        `${name}\r\n`
+      )
+    );
+
+    parts.push(Buffer.from(`--${boundary}--\r\n`));
+
+    const body = Buffer.concat(parts);
+    const uploadUrl = baseurl.replace(/\/+$/, "") + "/code-ontology/generate?llmPlatform=AWSBEDROCK";
+    const parsedUrl = url.parse(uploadUrl);
+    const protocol = parsedUrl.protocol === "https:" ? https : http;
+
+    const options = {
+      method: "POST",
+      headers: {
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Content-Length": body.length,
+        "api-key": apiKey,
+      },
+    };
+
+    const req = protocol.request(uploadUrl, options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          let parsed;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            parsed = data;
+          }
+          resolve({ statusCode: res.statusCode, body: parsed });
+        } else {
+          reject(
+            new Error(`Upload failed for ${fileName}: HTTP ${res.statusCode} - ${data}`)
+          );
+        }
+      });
+    });
+
+    req.on("error", (err) => {
+      reject(new Error(`Network error uploading ${fileName}: ${err.message}`));
+    });
+
+    req.write(body);
+    req.end();
+  });
+}
+
+async function uploadGeneratedFiles(outputDir, opts) {
+  const apiKey = opts.userApiKey;
+  const projectUuid = opts.uuid;
+  const baseurl = opts.baseurl;
+
+  const jsonFiles = fs.readdirSync(outputDir)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => path.join(outputDir, f));
+
+  if (jsonFiles.length === 0) {
+    console.error("❌ No JSON files found in output directory to upload.");
+    process.exit(1);
+  }
+
+  console.log(`\n📤 Uploading ${jsonFiles.length} file(s) to ${baseurl}/code-ontology/generate\n`);
+
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const filePath of jsonFiles) {
+    const fileName = path.basename(filePath);
+    try {
+      process.stdout.write(`  Uploading ${fileName}...`);
+      const result = await uploadToGenerate(filePath, apiKey, projectUuid, baseurl);
+      console.log(` done (HTTP ${result.statusCode})`);
+      successCount++;
+    } catch (err) {
+      console.log(` FAILED`);
+      console.error(`    ${err.message}`);
+      failCount++;
+    }
+  }
+
+  console.log(`\nUpload complete: ${successCount} succeeded, ${failCount} failed`);
+  if (failCount > 0) {
     process.exit(1);
   }
 }
