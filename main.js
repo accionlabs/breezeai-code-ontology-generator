@@ -179,6 +179,9 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
   let totalClasses = 0;
   let totalLinesOfCode = 0;
 
+  // Language file count statistics
+  const languageFileCount = {};
+
   // Config file statistics and consolidated info
   const configStats = {
     totalConfigFiles: 0,
@@ -336,6 +339,12 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
 
             mergedFiles.push(codeFileData);
 
+            // Count files by language
+            if (!languageFileCount[result.language]) {
+              languageFileCount[result.language] = 0;
+            }
+            languageFileCount[result.language]++;
+
             // Count functions in this file
             if (file.functions && Array.isArray(file.functions)) {
               totalFunctions += file.functions.length;
@@ -358,6 +367,11 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
   configStats.buildTools = [...new Set(configStats.buildTools)];
   configStats.dockerInfo.services = [...new Set(configStats.dockerInfo.services)];
   configStats.dockerInfo.exposedPorts = [...new Set(configStats.dockerInfo.exposedPorts)];
+
+  // Add language file counts into byType
+  Object.entries(languageFileCount).forEach(([lang, count]) => {
+    configStats.byType[lang] = count;
+  });
 
   // Create the final merged structure
   const mergedOutput = {
