@@ -94,7 +94,7 @@ async function run(opts) {
   }
 }
 
-function uploadToGenerate(filePath, apiKey, projectUuid, baseurl) {
+function uploadToGenerate(filePath, apiKey, projectUuid, baseurl, opts) {
   return new Promise((resolve, reject) => {
     const boundary = `----FormBoundary${Date.now().toString(16)}`;
     const fileContent = fs.readFileSync(filePath);
@@ -143,7 +143,8 @@ function uploadToGenerate(filePath, apiKey, projectUuid, baseurl) {
     parts.push(Buffer.from(`--${boundary}--\r\n`));
 
     const body = Buffer.concat(parts);
-    const uploadUrl = baseurl.replace(/\/+$/, "") + "/code-ontology/generate?llmPlatform=AWSBEDROCK";
+    const llmPlatform = opts.llmPlatform || "AWSBEDROCK";
+    const uploadUrl = baseurl.replace(/\/+$/, "") + `/code-ontology/generate?llmPlatform=${llmPlatform}`;
     const parsedUrl = url.parse(uploadUrl);
     const protocol = parsedUrl.protocol === "https:" ? https : http;
 
@@ -208,7 +209,7 @@ async function uploadGeneratedFiles(outputDir, opts) {
     const fileName = path.basename(filePath);
     try {
       process.stdout.write(`  Uploading ${fileName}...`);
-      const result = await uploadToGenerate(filePath, apiKey, projectUuid, baseurl);
+      const result = await uploadToGenerate(filePath, apiKey, projectUuid, baseurl, opts);
       console.log(` done (HTTP ${result.statusCode})`);
       successCount++;
     } catch (err) {

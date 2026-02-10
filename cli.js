@@ -31,7 +31,15 @@ program
   .option("--upload", "Upload generated files to the API after processing")
   .option("--baseurl <url>", "Base URL of the API (required with --upload)")
   .option("--uuid <uuid>", "UUID identifier (required with --upload)")
+  .option("--llmPlatform <name>", "LLM platform for code ontology generation: OPENAI, AWSBEDROCK, GEMINI (default: AWSBEDROCK)")
   .action(async (opts) => {
+    if (opts.llmPlatform) {
+      const allowedPlatforms = ["OPENAI", "AWSBEDROCK", "GEMINI"];
+      if (!allowedPlatforms.includes(opts.llmPlatform)) {
+        console.error(`error: invalid --llmPlatform value '${opts.llmPlatform}'. Allowed: ${allowedPlatforms.join(", ")}`);
+        process.exit(1);
+      }
+    }
     if (opts.upload) {
       const missing = [];
       if (!opts.baseurl) missing.push("--baseurl");
