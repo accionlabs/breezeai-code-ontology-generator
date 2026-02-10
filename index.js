@@ -21,6 +21,18 @@ async function run(opts) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
 
+    if (opts.update) {
+      console.log("\n🔄 Update mode: fetching existing file nodes...");
+      try {
+        const existingNodes = await fetchExistingFileNodes(opts.baseurl, opts.codeOntologyId, opts.userApiKey);
+        opts.existingFileNodes = existingNodes;
+        console.log("✅ Existing file nodes fetched successfully.");
+      } catch (err) {
+        console.error(`❌ Failed to fetch existing file nodes: ${err.message}`);
+        process.exit(1);
+      }
+    }
+
     const result = await autoDetectAndProcess(repoPath, outputDir, opts);
     if (!result.success) {
       process.exit(1);
@@ -181,6 +193,53 @@ function uploadToGenerate(filePath, apiKey, projectUuid, baseurl) {
     });
 
     req.write(body);
+    req.end();
+  });
+}
+
+function fetchExistingFileNodes(baseurl, codeOntologyId, apiKey) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify({
+      params: { codeOntologyId },
+      query: "MATCH (n:File) RETURN n.fileHash, n.path"
+    });
+
+    const endpoint = baseurl.replace(/\/+$/, "") + "/graph";
+    const parsedUrl = url.parse(endpoint);
+    const protocol = parsedUrl.protocol === "https:" ? https : http;
+
+    const options = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+        "api-key": apiKey,
+      },
+    };
+
+    const req = protocol.request(endpoint, options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            resolve(data);
+          }
+        } else {
+          reject(
+            new Error(`Failed to fetch existing file nodes: HTTP ${res.statusCode} - ${data}`)
+          );
+        }
+      });
+    });
+
+    req.on("error", (err) => {
+      reject(new Error(`Network error fetching file nodes: ${err.message}`));
+    });
+
+    req.write(payload);
     req.end();
   });
 }

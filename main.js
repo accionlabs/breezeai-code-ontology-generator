@@ -8,6 +8,7 @@
 const { execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const glob = require("glob");
 
 // Import language analyzers
@@ -22,13 +23,15 @@ const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
 
 const isWindows = process.platform === "win32";
 
-// Helper function to count lines of code
-function countLinesOfCode(filePath) {
+// Helper function to count lines of code and compute file hash
+function getFileStats(filePath) {
   try {
     const content = fs.readFileSync(filePath, "utf-8");
-    return content.split("\n").length;
+    const loc = content.split("\n").length;
+    const fileHash = crypto.createHash("sha256").update(content).digest("hex");
+    return { loc, fileHash };
   } catch (err) {
-    return 0;
+    return { loc: 0, fileHash: null };
   }
 }
 
@@ -218,7 +221,7 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
         // Add language identifier to each file and count functions/classes
         result.data.forEach(file => {
           const filePath = path.join(repoPath, file.path);
-          const loc = countLinesOfCode(filePath);
+          const { loc, fileHash } = getFileStats(filePath);
           totalLinesOfCode += loc;
 
           // Process config files differently
@@ -238,6 +241,7 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
               type: "config",
               language: "config",
               loc,
+              fileHash,
               metadata
             };
 
@@ -331,7 +335,8 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
               ...file,
               type: "code",
               language: result.language,
-              loc
+              loc,
+              fileHash
             };
 
             mergedFiles.push(codeFileData);

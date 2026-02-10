@@ -29,9 +29,26 @@ program
   .option("--verbose", "Show detailed processing information", false)
   .option("--user-api-key <key>", "API key for authentication")
   .option("--upload", "Upload generated files to the API after processing")
-  .option("--baseurl <url>", "Base URL of the API (required with --upload)")
+  .option("--baseurl <url>", "Base URL of the API (required with --upload or --update)")
   .option("--uuid <uuid>", "UUID identifier (required with --upload)")
+  .option("--update", "Update an existing ontology by re-parsing only changed files", false)
+  .option("--code-ontology-id <id>", "Code ontology ID (required with --update)")
   .action(async (opts) => {
+    if (opts.update) {
+      const missing = [];
+      if (!opts.baseurl) missing.push("--baseurl");
+      if (!opts.codeOntologyId) missing.push("--code-ontology-id");
+      if (!opts.userApiKey) missing.push("--user-api-key");
+      if (missing.length > 0) {
+        console.error(`error: missing required options when --update is used: ${missing.join(", ")}`);
+        process.exit(1);
+      }
+    } else {
+      if (opts.codeOntologyId) {
+        console.error("error: --code-ontology-id can only be used with --update");
+        process.exit(1);
+      }
+    }
     if (opts.upload) {
       const missing = [];
       if (!opts.baseurl) missing.push("--baseurl");
