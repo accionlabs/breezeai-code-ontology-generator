@@ -6,6 +6,7 @@
 const fs = require("fs");
 const path = require("path");
 const glob = require("glob");
+const { filterChangedFiles } = require("../utils");
 
 // Patterns for config files to parse (root level only)
 const CONFIG_PATTERNS = {
@@ -434,7 +435,7 @@ function parseGenericConfig(filePath, repoPath, fileType) {
 /**
  * Main function to analyze config files in repository (root level only)
  */
-function analyzeConfigRepo(repoPath) {
+function analyzeConfigRepo(repoPath, existingHashMap) {
   console.log("\n📋 Analyzing root-level configuration files...");
 
   const configFiles = [];
@@ -456,12 +457,13 @@ function analyzeConfigRepo(repoPath) {
   for (const [configType, patterns] of Object.entries(CONFIG_PATTERNS)) {
     for (const pattern of patterns) {
       // Use cwd option to search only in the root directory
-      const files = glob.sync(pattern, {
+      let files = glob.sync(pattern, {
         cwd: repoPath,
         absolute: true,
         nodir: true,
         dot: true // Include dotfiles like .env
       });
+      files = filterChangedFiles(files, repoPath, existingHashMap);
 
       for (const file of files) {
         // Double-check that file is actually in root directory (not subdirectory)

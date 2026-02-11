@@ -12,6 +12,7 @@ const Parser = require("tree-sitter");
 const CSharp = require("tree-sitter-c-sharp");
 const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-csharp");
 const { extractClasses } = require("./extract-classes-csharp");
+const { filterChangedFiles } = require("../utils");
 
 // -------------------------------------------------------------
 // Get C# files
@@ -285,8 +286,9 @@ function isCSharpStdLib(namespace) {
 // -------------------------------------------------------------
 // Analyze C# files
 // -------------------------------------------------------------
-function analyzeCSharpRepo(repoPath) {
-  const csFiles = getCSharpFiles(repoPath);
+function analyzeCSharpRepo(repoPath, existingHashMap) {
+  let csFiles = getCSharpFiles(repoPath);
+  csFiles = filterChangedFiles(csFiles, repoPath, existingHashMap);
   const totalFiles = csFiles.length;
 
   console.log(`\n📂 Building class and method index...`);

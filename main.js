@@ -154,12 +154,12 @@ function detectLanguages(repoPath, verbose = false) {
 // ----------------------------
 // Process a single language
 // ----------------------------
-async function processLanguage(language, repoPath, verbose = false) {
+async function processLanguage(language, repoPath, verbose = false, existingHashMap = null) {
   try {
     console.log(`\n🚀 Processing ${language.name}...`);
 
     // Call the analyzer function directly (no more temp files!)
-    const data = await Promise.resolve(language.analyzer(repoPath));
+    const data = await Promise.resolve(language.analyzer(repoPath, existingHashMap));
 
     console.log(`✅ ${language.name} analysis complete!`);
 
@@ -173,7 +173,7 @@ async function processLanguage(language, repoPath, verbose = false) {
 // ----------------------------
 // Merge all language outputs into single JSON
 // ----------------------------
-function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
+function mergeLanguageOutputs(languageResults, repoPath, outputDir, opts = {}) {
   console.log("\n🔄 Merging all language outputs...");
 
   const mergedFiles = [];
@@ -542,10 +542,12 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
 
     console.log(`\n📊 Detected ${detectedLanguages.length} language(s): ${detectedLanguages.map(l => l.name).join(", ")}`);
 
+    const existingHashMap = opts.existingHashMap || null;
+
     // Step 2: Process each detected language
     const results = [];
     for (const language of detectedLanguages) {
-      const result = await processLanguage(language, repoPath, verbose);
+      const result = await processLanguage(language, repoPath, verbose, existingHashMap);
       if (result) {
         results.push(result);
       }
@@ -558,7 +560,7 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
 
     // Step 2.5: Process config files (always run for all repositories)
     try {
-      const configData = analyzeConfigRepo(repoPath);
+      const configData = analyzeConfigRepo(repoPath, existingHashMap);
       if (configData && configData.length > 0) {
         results.push({
           language: "config",
@@ -571,7 +573,7 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
     }
 
     // Step 3: Merge all outputs
-    const mergedOutputPath = mergeLanguageOutputs(results, repoPath, outputDir);
+    const mergedOutputPath = mergeLanguageOutputs(results, repoPath, outputDir, opts);
 
     // Step 4: Generate descriptions if requested
     if (opts.generateDescriptions) {

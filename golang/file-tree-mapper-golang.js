@@ -7,6 +7,7 @@ const Parser = require("tree-sitter");
 const Go = require("tree-sitter-go");
 const { extractFunctionsAndCalls } = require("./extract-functions-golang");
 const { extractClasses } = require("./extract-classes-golang");
+const { filterChangedFiles } = require("../utils");
 
 const parser = new Parser();
 parser.setLanguage(Go);
@@ -78,8 +79,9 @@ function extractImports(filePath) {
 // -------------------------------------------------------------
 // Analyze Imports
 // -------------------------------------------------------------
-function analyzeImports(repoPath) {
-  const goFiles = getGoFiles(repoPath);
+function analyzeImports(repoPath, existingHashMap) {
+  let goFiles = getGoFiles(repoPath);
+  goFiles = filterChangedFiles(goFiles, repoPath, existingHashMap);
   const results = [];
   const totalFiles = goFiles.length;
 
@@ -173,8 +175,8 @@ function analyzeImports(repoPath) {
 // -------------------------------------------------------------
 // Wrapper
 // -------------------------------------------------------------
-function analyzeGolangRepo(repoPath) {
-  return analyzeImports(repoPath);
+function analyzeGolangRepo(repoPath, existingHashMap) {
+  return analyzeImports(repoPath, existingHashMap);
 }
 
 module.exports = { analyzeGolangRepo };

@@ -13,6 +13,7 @@ const glob = require("glob");
 const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
 const { extractFuncitonAndItsCalls } = require("./extract-functions-nodejs");
+const { filterChangedFiles } = require("../utils");
 const { extractClasses } = require("./extract-classes-nodejs");
 
 // -------------------------------------------------------------
@@ -116,8 +117,9 @@ function getJsFiles(repoPath) {
 // -------------------------------------------------------------
 // Step 4: Analyze imports
 // -------------------------------------------------------------
-function analyzeImports(repoPath, mapper) {
-  const jsFiles = getJsFiles(repoPath)
+function analyzeImports(repoPath, mapper, existingHashMap) {
+  let jsFiles = getJsFiles(repoPath);
+  jsFiles = filterChangedFiles(jsFiles, repoPath, existingHashMap);
 
 
   const results = [];
@@ -266,11 +268,11 @@ function analyzeImports(repoPath, mapper) {
 // -------------------------------------------------------------
 // Main export function - to be called from main.js
 // -------------------------------------------------------------
-function analyzeJavaScriptRepo(repoPath) {
+function analyzeJavaScriptRepo(repoPath, existingHashMap) {
   console.log(`📂 Scanning JavaScript repo: ${repoPath}`);
 
   const mapper = buildPackageMapper(repoPath);
-  const analysis = analyzeImports(repoPath, mapper);
+  const analysis = analyzeImports(repoPath, mapper, existingHashMap);
 
   console.log(`\n📊 Summary:`);
   console.log(`   JavaScript files: ${analysis.length}`);

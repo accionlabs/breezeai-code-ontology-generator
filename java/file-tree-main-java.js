@@ -12,6 +12,7 @@ const path = require("path");
 const fs = require("fs");
 const glob = require("glob");
 const os = require("os");
+const { filterChangedFiles } = require("../utils");
 
 // ---------- class index ----------
 function buildJavaClassIndex(repoPath) {
@@ -38,13 +39,14 @@ function buildJavaClassIndex(repoPath) {
 // -------------------------------------------------------------
 // Main export function - to be called from main.js
 // -------------------------------------------------------------
-function analyzeJavaRepo(repoPath) {
+function analyzeJavaRepo(repoPath, existingHashMap) {
   return new Promise((resolve, reject) => {
     console.log(`📂 Scanning Java repo: ${repoPath}`);
 
-    const javaFiles = glob.sync(`${repoPath}/**/*.java`, {
+    let javaFiles = glob.sync(`${repoPath}/**/*.java`, {
       ignore: ["**/target/**", "**/build/**", "**/node_modules/**"]
     });
+    javaFiles = filterChangedFiles(javaFiles, repoPath, existingHashMap);
 
     const classIndex = buildJavaClassIndex(repoPath);
 

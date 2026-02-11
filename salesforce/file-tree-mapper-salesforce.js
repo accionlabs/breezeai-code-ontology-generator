@@ -11,11 +11,12 @@ const Parser = require("tree-sitter");
 const apex = require("tree-sitter-sfapex");
 const { extractFunctionsAndCalls, extractReferences } = require("./extract-functions-salesforce");
 const { extractClasses } = require("./extract-classes-salesforce");
+const { filterChangedFiles } = require("../utils");
 
 // Wrapper function to analyze Salesforce Apex repository
-function analyzeSalesforceRepo(repoPath) {
+function analyzeSalesforceRepo(repoPath, existingHashMap) {
   const classIndex = buildClassIndex(repoPath);
-  const analysis = analyzeApexFiles(repoPath, classIndex);
+  const analysis = analyzeApexFiles(repoPath, classIndex, existingHashMap);
   return analysis;
 }
 
@@ -193,9 +194,10 @@ function isPrimitiveType(typeName) {
 // -------------------------------------------------------------
 // Step 4: Analyze Apex files
 // -------------------------------------------------------------
-function analyzeApexFiles(repoPath, classIndex) {
+function analyzeApexFiles(repoPath, classIndex, existingHashMap) {
   console.log("Started analyzing Apex files...");
-  const apexFiles = getApexFiles(repoPath);
+  let apexFiles = getApexFiles(repoPath);
+  apexFiles = filterChangedFiles(apexFiles, repoPath, existingHashMap);
 
   const results = [];
   const totalFiles = apexFiles.length;

@@ -13,6 +13,7 @@ const path = require("path");
 const glob = require("glob");
 const { extractFunctionsAndCalls, extractImports: extractImportsTS } = require("./extract-functions-typescript");
 const { extractClasses } = require("./extract-classes-typescript");
+const { filterChangedFiles } = require("../utils");
 const { loadPathAliases, resolveWithAlias } = require("./resolve-path-aliases");
 
 // -------------------------------------------------------------
@@ -44,8 +45,9 @@ function getJsFilesOnly(repoPath) {
 // -------------------------------------------------------------
 // Analyze TypeScript files (.ts, .tsx)
 // -------------------------------------------------------------
-function analyzeTypeScriptFiles(repoPath, pathAliases) {
-  const tsFiles = getTsFilesOnly(repoPath);
+function analyzeTypeScriptFiles(repoPath, pathAliases, existingHashMap) {
+  let tsFiles = getTsFilesOnly(repoPath);
+  tsFiles = filterChangedFiles(tsFiles, repoPath, existingHashMap);
   const results = [];
   const totalFiles = tsFiles.length;
 
@@ -195,11 +197,11 @@ function analyzeTypeScriptFiles(repoPath, pathAliases) {
 // -------------------------------------------------------------
 // Main export function - to be called from main.js
 // -------------------------------------------------------------
-function analyzeTypeScriptRepo(repoPath) {
+function analyzeTypeScriptRepo(repoPath, existingHashMap) {
   const pathAliases = loadPathAliases(repoPath);
   console.log(`📂 Scanning TypeScript repo: ${repoPath}`);
 
-  const tsResults = analyzeTypeScriptFiles(repoPath, pathAliases);
+  const tsResults = analyzeTypeScriptFiles(repoPath, pathAliases, existingHashMap);
 
   console.log(`\n📊 Summary:`);
   console.log(`   TypeScript files: ${tsResults.length}`);

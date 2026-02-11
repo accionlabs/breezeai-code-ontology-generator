@@ -12,6 +12,7 @@ const path = require("path");
 const glob = require("glob");
 const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-python");
 const { extractClasses } = require("./extract-classes-python");
+const { filterChangedFiles } = require("../utils");
 
 // -------------------------------------------------------------
 // Get Python files
@@ -80,8 +81,9 @@ function resolveImportPath(importSource, currentFilePath, repoPath) {
 // -------------------------------------------------------------
 // Analyze files with functions and classes
 // -------------------------------------------------------------
-function analyzeFiles(repoPath) {
-  const pyFiles = getPythonFiles(repoPath);
+function analyzeFiles(repoPath, existingHashMap) {
+  let pyFiles = getPythonFiles(repoPath);
+  pyFiles = filterChangedFiles(pyFiles, repoPath, existingHashMap);
   const results = [];
   const totalFiles = pyFiles.length;
 
@@ -147,10 +149,10 @@ function analyzeFiles(repoPath) {
 // -------------------------------------------------------------
 // Main export function - to be called from main.js
 // -------------------------------------------------------------
-function analyzePythonRepo(repoPath) {
+function analyzePythonRepo(repoPath, existingHashMap) {
   console.log(`📂 Scanning Python repo: ${repoPath}`);
 
-  const analysis = analyzeFiles(repoPath);
+  const analysis = analyzeFiles(repoPath, existingHashMap);
 
   console.log(`\n📊 Summary:`);
   console.log(`   Python files: ${analysis.length}`);
