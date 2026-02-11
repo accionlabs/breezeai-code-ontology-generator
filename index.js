@@ -113,7 +113,43 @@ async function run(opts) {
     }
 
     if (opts.upload) {
-      await uploadGeneratedFiles(outputDir, opts);
+      if (opts.update) {
+        // In update mode, PUT to /code-ontology/reindex/<codeOntologyId>
+        const jsonFiles = fs.readdirSync(outputDir)
+          .filter((f) => f.endsWith(".json"))
+          .map((f) => path.join(outputDir, f));
+
+        if (jsonFiles.length === 0) {
+          console.error("❌ No JSON files found in output directory to upload.");
+          process.exit(1);
+        }
+
+        console.log(`\n📤 Uploading ${jsonFiles.length} file(s) to ${opts.baseurl}/code-ontology/reindex/${opts.codeOntologyId}\n`);
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const filePath of jsonFiles) {
+          const fileName = path.basename(filePath);
+          try {
+            process.stdout.write(`  Uploading ${fileName}...`);
+            const uploadResult = await uploadToReindex(filePath, opts.userApiKey, opts.codeOntologyId, opts.baseurl);
+            console.log(` done (HTTP ${uploadResult.statusCode})`);
+            successCount++;
+          } catch (err) {
+            console.log(` FAILED`);
+            console.error(`    ${err.message}`);
+            failCount++;
+          }
+        }
+
+        console.log(`\nUpload complete: ${successCount} succeeded, ${failCount} failed`);
+        if (failCount > 0) {
+          process.exit(1);
+        }
+      } else {
+        await uploadGeneratedFiles(outputDir, opts);
+      }
     }
     return;
   }
@@ -380,6 +416,70 @@ function fetchCodeOntologyMetadata(baseurl, codeOntologyId, apiKey) {
       reject(new Error(`Network error fetching code-ontology metadata: ${err.message}`));
     });
 
+    req.end();
+  });
+}
+
+function uploadToReindex(filePath, apiKey, codeOntologyId, baseurl) {
+  return new Promise((resolve, reject) => {
+    const boundary = `----FormBoundary${Date.now().toString(16)}`;
+    const fileContent = fs.readFileSync(filePath);
+    const fileName = path.basename(filePath);
+
+    const parts = [];
+
+    // file field
+    parts.push(
+      Buffer.from(
+        `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
+        `Content-Type: application/json\r\n\r\n`
+      )
+    );
+    parts.push(fileContent);
+    parts.push(Buffer.from(`\r\n`));
+
+    parts.push(Buffer.from(`--${boundary}--\r\n`));
+
+    const body = Buffer.concat(parts);
+    const uploadUrl = baseurl.replace(/\/+$/, "") + `/code-ontology/reindex/${encodeURIComponent(codeOntologyId)}`;
+    const parsedUrl = url.parse(uploadUrl);
+    const protocol = parsedUrl.protocol === "https:" ? https : http;
+
+    const options = {
+      method: "PUT",
+      headers: {
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Content-Length": body.length,
+        "api-key": apiKey,
+      },
+    };
+
+    const req = protocol.request(uploadUrl, options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          let parsed;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            parsed = data;
+          }
+          resolve({ statusCode: res.statusCode, body: parsed });
+        } else {
+          reject(
+            new Error(`Reindex upload failed for ${fileName}: HTTP ${res.statusCode} - ${data}`)
+          );
+        }
+      });
+    });
+
+    req.on("error", (err) => {
+      reject(new Error(`Network error uploading ${fileName} for reindex: ${err.message}`));
+    });
+
+    req.write(body);
     req.end();
   });
 }
