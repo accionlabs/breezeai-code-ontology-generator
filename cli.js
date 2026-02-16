@@ -46,4 +46,14 @@ program
     await run(opts);
   });
 
+// serve command
+program
+  .command("serve")
+  .description("Start the HTTP API server for code ontology generation")
+  .option("-p, --port <number>", "Port to listen on", "3000")
+  .action((opts) => {
+    const { startServer } = require("./server");
+    startServer(parseInt(opts.port, 10));
+  });
+
 program.parse();

@@ -417,7 +417,7 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
     }
   }
 
-  return mergedOutputPath;
+  return { outputPath: mergedOutputPath, data: mergedOutput };
 }
 
 // ----------------------------
@@ -580,7 +580,7 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
     }
 
     // Step 3: Merge all outputs
-    const mergedOutputPath = mergeLanguageOutputs(results, repoPath, outputDir);
+    const { outputPath: mergedOutputPath } = mergeLanguageOutputs(results, repoPath, outputDir);
 
     // Step 4: Generate descriptions if requested
     if (opts.generateDescriptions) {
