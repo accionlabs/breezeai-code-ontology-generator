@@ -1,22 +1,27 @@
-
 FROM node:22-alpine
- 
-# Set working directory
-WORKDIR /usr/src
- 
-# Copy package files first for caching
+
+WORKDIR /usr/src/app
+
+# Install full native build toolchain for node-gyp
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    build-base \
+    libc6-compat
+
+# Tell npm explicitly where python is
+ENV PYTHON=/usr/bin/python3
+
+# Copy dependency files first
 COPY package.json package-lock.json ./
- 
- 
-# Install Node.js dependencies
+
+# Install dependencies
 RUN npm install --legacy-peer-deps
- 
-# Copy application source code
+
+# Copy rest of app
 COPY . .
- 
- 
-# Expose app port
+
 EXPOSE 3000
- 
-# Start the app
+
 CMD ["npm", "run", "serve"]
