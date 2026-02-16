@@ -8,6 +8,8 @@ const {
   mergeLanguageOutputs,
 } = require("./main");
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
+const { BREEZE_API_URL } = require("./app-config");
+const callHttp = require("./call-http");
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -152,14 +154,14 @@ app.post("/api/analyze", async (req, res) => {
 
 // Git diff analysis endpoint
 app.post("/api/analyze-diff", async (req, res) => {
-  const { repoUrl, currentCommitId, incomingCommitId, gitToken, gitBranch } =
+  const { repoUrl, currentCommitId, incomingCommitId, gitToken, gitBranch, projectUuid, codeOntologyId } =
     req.body;
 
   // Validate required fields
-  if (!repoUrl || !currentCommitId || !incomingCommitId || !gitToken || !gitBranch) {
+  if (!repoUrl || !currentCommitId || !incomingCommitId || !gitToken || !gitBranch || !projectUuid) {
     return res.status(400).json({
       error:
-        "All fields required: repoUrl, currentCommitId, incomingCommitId, gitToken, gitBranch",
+        "All fields required: repoUrl, currentCommitId, incomingCommitId, gitToken, gitBranch, projectUuid",
     });
   }
 
@@ -220,7 +222,14 @@ app.post("/api/analyze-diff", async (req, res) => {
     }
 
     output.deletedFiles = deletedFiles;
-    res.json(output);
+    output.projectUuid = projectUuid;
+    output.codeOntologyId = codeOntologyId;
+    output.projectMetaData.repositoryPath = repoUrl;
+    output.projectMetaData.repositoryName = repo; 
+    output.projectMetaData.gitBranch = gitBranch;
+    output.projectMetaData.commitId = incomingCommitId;
+    const httpRes = await callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert`, output);
+    res.json(httpRes);
   } catch (err) {
     console.error("Analyze-diff error:", err);
     const status = err.statusCode || 500;
