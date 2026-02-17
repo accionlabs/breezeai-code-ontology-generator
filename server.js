@@ -224,11 +224,10 @@ app.post("/api/analyze-diff", async (req, res) => {
     output.deletedFiles = deletedFiles;
     output.projectUuid = projectUuid;
     output.codeOntologyId = codeOntologyId;
-    output.projectMetaData.repositoryPath = repoUrl;
-    output.projectMetaData.repositoryName = repo; 
+    output.projectMetaData.repoUrl = repoUrl;
     output.projectMetaData.gitBranch = gitBranch;
     output.projectMetaData.commitId = incomingCommitId;
-    const httpRes = await callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert`, output);
+    const httpRes = await callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert?llmPlatform=${req.query.llmPlatform || 'AWSBEDROCK'}`, output);
     res.json(httpRes);
   } catch (err) {
     console.error("Analyze-diff error:", err);
