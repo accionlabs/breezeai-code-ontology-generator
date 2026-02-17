@@ -7,6 +7,7 @@ const {
   processLanguage,
   mergeLanguageOutputs,
 } = require("./main");
+const { generateDescriptionsAsync, addMetadataAsync } = require("./llm-enrichment");
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
 const { BREEZE_API_URL } = require("./app-config");
 const callHttp = require("./call-http");
@@ -38,8 +39,9 @@ async function githubApi(endpoint, token) {
   return res.json();
 }
 
-async function runAnalysis(files, projectName, skeletonPaths) {
+async function runAnalysis(files, projectName, skeletonPaths, { keepTempDir = false } = {}) {
   let tempDir;
+  let shouldCleanup = true;
   try {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ontology-"));
     console.log(`Temp directory created: ${tempDir}`);
@@ -98,9 +100,13 @@ async function runAnalysis(files, projectName, skeletonPaths) {
     output.projectMetaData.repositoryPath = name;
     output.projectMetaData.repositoryName = name;
 
-    return output;
+    if (keepTempDir) {
+      shouldCleanup = false;
+      return { output, tempDir };
+    }
+    return { output };
   } finally {
-    if (tempDir) {
+    if (tempDir && shouldCleanup) {
       console.log(`Cleaning up temp directory: ${tempDir}`);
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -109,6 +115,39 @@ async function runAnalysis(files, projectName, skeletonPaths) {
       }
     }
   }
+}
+
+function cleanupTempDir(tempDir) {
+  if (tempDir) {
+    console.log(`Cleaning up temp directory: ${tempDir}`);
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch (_) {
+      // best-effort cleanup
+    }
+  }
+}
+
+function getLlmOpts(llmPlatform) {
+  const {
+    OPENAI_API_KEY,
+    CLAUDE_API_KEY,
+    GEMINI_API_KEY,
+    AWS_ACCESS_KEY,
+    AWS_SECRET_KEY,
+    AWS_REGION,
+  } = require("./app-config");
+
+  const platformMap = {
+    OPENAI: { provider: "openai", apiKey: OPENAI_API_KEY },
+    CLAUDE: { provider: "claude", apiKey: CLAUDE_API_KEY },
+    ANTHROPIC: { provider: "claude", apiKey: CLAUDE_API_KEY },
+    GEMINI: { provider: "gemini", apiKey: GEMINI_API_KEY },
+    AWSBEDROCK: { provider: "bedrock", awsAccessKey: AWS_ACCESS_KEY, awsSecretKey: AWS_SECRET_KEY, awsRegion: AWS_REGION },
+  };
+
+  const platform = (llmPlatform || "AWSBEDROCK").toUpperCase();
+  return platformMap[platform] || platformMap.AWSBEDROCK;
 }
 
 // --- Routes ---
@@ -143,7 +182,7 @@ app.post("/api/analyze", async (req, res) => {
   }
 
   try {
-    const output = await runAnalysis(files, projectName);
+    const { output } = await runAnalysis(files, projectName);
     res.json(output);
   } catch (err) {
     console.error("Analysis error:", err);
@@ -214,21 +253,45 @@ app.post("/api/analyze-diff", async (req, res) => {
     }
 
     const changedPaths = new Set(files.map((f) => f.path));
-    const output = await runAnalysis(files, repo, skeletonPaths);
+    const llmPlatform = req.query.llmPlatform || "AWSBEDROCK";
+    const { output, tempDir } = await runAnalysis(files, repo, skeletonPaths, { keepTempDir: true });
 
-    // Keep only changed files in the output, not skeleton placeholders
-    if (output.files) {
-      output.files = output.files.filter((f) => changedPaths.has(f.path));
+    try {
+      // Keep only changed files in the output, not skeleton placeholders
+      if (output.files) {
+        output.files = output.files.filter((f) => changedPaths.has(f.path));
+      }
+
+      // Write output to temp JSON file for description/metadata generation
+      const outputJsonPath = path.join(tempDir, `${repo}-project-analysis.json`);
+      fs.writeFileSync(outputJsonPath, JSON.stringify(output, null, 2));
+
+      // Generate descriptions and metadata using the specified LLM platform
+      const llmOpts = getLlmOpts(llmPlatform);
+      generateDescriptionsAsync(outputJsonPath, tempDir, llmOpts).then(async () => {
+         const enrichedOutput = JSON.parse(fs.readFileSync(outputJsonPath, "utf-8"));
+
+        enrichedOutput.deletedFiles = deletedFiles;
+        enrichedOutput.projectUuid = projectUuid;
+        enrichedOutput.codeOntologyId = codeOntologyId;
+        enrichedOutput.projectMetaData.repoUrl = repoUrl;
+        enrichedOutput.projectMetaData.gitBranch = gitBranch;
+        enrichedOutput.projectMetaData.commitId = incomingCommitId;
+        const httpRes = await callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert?llmPlatform=${llmPlatform}`, enrichedOutput);
+        console.log("Breeze API response:", httpRes);
+
+      }).catch((err) => { 
+        console.error("Error generating descriptions or sending to Breeze API:", err);
+      });
+      // await addMetadataAsync(outputJsonPath, tempDir, llmOpts);
+
+      // Read back the enriched output
+     
+
+      res.json({ success: true, message: "Code ontology "+ "generated and sent to Breeze API for upsert. Enrichment is done asynchronously and may take additional time." });
+    } finally {
+      cleanupTempDir(tempDir);
     }
-
-    output.deletedFiles = deletedFiles;
-    output.projectUuid = projectUuid;
-    output.codeOntologyId = codeOntologyId;
-    output.projectMetaData.repoUrl = repoUrl;
-    output.projectMetaData.gitBranch = gitBranch;
-    output.projectMetaData.commitId = incomingCommitId;
-    const httpRes = await callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert?llmPlatform=${req.query.llmPlatform || 'AWSBEDROCK'}`, output);
-    res.json(httpRes);
   } catch (err) {
     console.error("Analyze-diff error:", err);
     const status = err.statusCode || 500;
