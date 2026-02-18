@@ -197,10 +197,10 @@ app.post("/api/analyze-diff", async (req, res) => {
     req.body;
 
   // Validate required fields
-  if (!repoUrl || !currentCommitId || !incomingCommitId || !gitToken || !gitBranch || !projectUuid) {
+  if (!repoUrl || !incomingCommitId || !gitToken || !gitBranch || !projectUuid || !codeOntologyId) {
     return res.status(400).json({
       error:
-        "All fields required: repoUrl, currentCommitId, incomingCommitId, gitToken, gitBranch, projectUuid",
+        "All fields required: repoUrl, incomingCommitId, gitToken, gitBranch, projectUuid, codeOntologyId",
     });
   }
 
@@ -209,6 +209,9 @@ app.post("/api/analyze-diff", async (req, res) => {
     return res.status(400).json({ error: "Invalid GitHub repo URL" });
   }
   const { owner, repo } = parsed;
+
+  // Treat "null", "undefined", empty string as no currentCommitId
+  const hasCurrentCommit = currentCommitId && currentCommitId !== "null" && currentCommitId !== "undefined";
 
   try {
     // Fetch full directory tree at incomingCommitId for path resolution
@@ -220,36 +223,110 @@ app.post("/api/analyze-diff", async (req, res) => {
       .filter((entry) => entry.type === "blob")
       .map((entry) => entry.path);
 
-    // Compare the two commits
-    const comparison = await githubApi(
-      `/repos/${owner}/${repo}/compare/${currentCommitId}...${incomingCommitId}`,
-      gitToken
-    );
+    let files = [];
+    let deletedFiles = [];
 
-    const ghFiles = comparison.files || [];
-    const deletedFiles = ghFiles
-      .filter((f) => f.status === "removed")
-      .map((f) => f.filename);
-    const changedFiles = ghFiles.filter((f) => f.status !== "removed");
-
-    if (changedFiles.length === 0) {
-      return res.status(422).json({
-        error: "No changed files found between the two commits",
-        deletedFiles,
-      });
-    }
-
-    // Fetch content for each changed file
-    const files = [];
-    for (const cf of changedFiles) {
-      const contentData = await githubApi(
-        `/repos/${owner}/${repo}/contents/${encodeURIComponent(cf.filename)}?ref=${incomingCommitId}`,
+    if (hasCurrentCommit) {
+      // Compare the two commits
+      const comparison = await githubApi(
+        `/repos/${owner}/${repo}/compare/${currentCommitId}...${incomingCommitId}`,
         gitToken
       );
-      const content = Buffer.from(contentData.content, "base64").toString(
-        "utf-8"
+
+      const ghFiles = comparison.files || [];
+      deletedFiles = ghFiles
+        .filter((f) => f.status === "removed")
+        .map((f) => f.filename);
+      const changedFiles = ghFiles.filter((f) => f.status !== "removed");
+
+      if (changedFiles.length === 0) {
+        return res.status(422).json({
+          error: "No changed files found between the two commits",
+          deletedFiles,
+        });
+      }
+
+      // Fetch content for each changed file
+      for (const cf of changedFiles) {
+        const contentData = await githubApi(
+          `/repos/${owner}/${repo}/contents/${encodeURIComponent(cf.filename)}?ref=${incomingCommitId}`,
+          gitToken
+        );
+        const content = Buffer.from(contentData.content, "base64").toString(
+          "utf-8"
+        );
+        files.push({ path: cf.filename, content });
+      }
+    } else {
+      // No currentCommitId — fetch all changes on the branch up to incomingCommitId
+      // Get repo's default branch to use as the base for comparison
+
+      console.log("No currentCommitId provided, fetching all files up to incomingCommitId on branch", gitBranch);
+      const repoInfo = await githubApi(`/repos/${owner}/${repo}`, gitToken);
+      const defaultBranch = repoInfo.default_branch;
+
+      // List commits on the branch to find the very first commit
+      const commits = await githubApi(
+        `/repos/${owner}/${repo}/commits?sha=${incomingCommitId}&per_page=1`,
+        gitToken
       );
-      files.push({ path: cf.filename, content });
+
+      if (commits.length > 0) {
+        let comparison;
+        try {
+          // Compare default branch with incomingCommitId to get all branch changes
+          comparison = await githubApi(
+            `/repos/${owner}/${repo}/compare/${defaultBranch}...${incomingCommitId}`,
+            gitToken
+          );
+        } catch (_) {
+          // If compare fails (e.g. branch IS the default branch or no common ancestor),
+          // fall back to fetching all files from the tree
+          comparison = null;
+        }
+
+        if (comparison && comparison.files && comparison.files.length > 0) {
+          const ghFiles = comparison.files;
+          deletedFiles = ghFiles
+            .filter((f) => f.status === "removed")
+            .map((f) => f.filename);
+          const changedFiles = ghFiles.filter((f) => f.status !== "removed");
+
+          for (const cf of changedFiles) {
+            const contentData = await githubApi(
+              `/repos/${owner}/${repo}/contents/${encodeURIComponent(cf.filename)}?ref=${incomingCommitId}`,
+              gitToken
+            );
+            const content = Buffer.from(contentData.content, "base64").toString(
+              "utf-8"
+            );
+            files.push({ path: cf.filename, content });
+          }
+        } else {
+          // Fallback: fetch all files from the tree at incomingCommitId
+          const allBlobs = skeletonPaths;
+          for (const blobPath of allBlobs) {
+            try {
+              const contentData = await githubApi(
+                `/repos/${owner}/${repo}/contents/${encodeURIComponent(blobPath)}?ref=${incomingCommitId}`,
+                gitToken
+              );
+              const content = Buffer.from(contentData.content, "base64").toString(
+                "utf-8"
+              );
+              files.push({ path: blobPath, content });
+            } catch (err) {
+              console.warn(`Skipping binary/unreadable file: ${blobPath}`);
+            }
+          }
+        }
+      }
+
+      if (files.length === 0) {
+        return res.status(422).json({
+          error: "No changed files found on the branch up to the specified commit",
+        });
+      }
     }
 
     const changedPaths = new Set(files.map((f) => f.path));
@@ -277,11 +354,12 @@ app.post("/api/analyze-diff", async (req, res) => {
         enrichedOutput.projectMetaData.repoUrl = repoUrl;
         enrichedOutput.projectMetaData.gitBranch = gitBranch;
         enrichedOutput.projectMetaData.commitId = incomingCommitId;
-        const httpRes = await callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert?llmPlatform=${llmPlatform}`, enrichedOutput);
-        console.log("Breeze API response:", httpRes);
-
+        await callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert?llmPlatform=${llmPlatform}`, enrichedOutput);
+        console.log("Breeze API response sent");
+        cleanupTempDir(tempDir);
       }).catch((err) => { 
         console.error("Error generating descriptions or sending to Breeze API:", err);
+        cleanupTempDir(tempDir);
       });
       // await addMetadataAsync(outputJsonPath, tempDir, llmOpts);
 
@@ -289,8 +367,8 @@ app.post("/api/analyze-diff", async (req, res) => {
      
 
       res.json({ success: true, message: "Code ontology "+ "generated and sent to Breeze API for upsert. Enrichment is done asynchronously and may take additional time." });
-    } finally {
-      cleanupTempDir(tempDir);
+    } catch (err) {
+      throw err
     }
   } catch (err) {
     console.error("Analyze-diff error:", err);
