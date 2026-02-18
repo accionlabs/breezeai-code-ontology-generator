@@ -345,7 +345,7 @@ app.post("/api/analyze-diff", async (req, res) => {
 
       // Generate descriptions and metadata using the specified LLM platform
       const llmOpts = getLlmOpts(llmPlatform);
-      generateDescriptionsAsync(outputJsonPath, tempDir, llmOpts).then(async () => {
+      // generateDescriptionsAsync(outputJsonPath, tempDir, llmOpts).then(async () => {
          const enrichedOutput = JSON.parse(fs.readFileSync(outputJsonPath, "utf-8"));
 
         enrichedOutput.deletedFiles = deletedFiles;
@@ -354,13 +354,15 @@ app.post("/api/analyze-diff", async (req, res) => {
         enrichedOutput.projectMetaData.repoUrl = repoUrl;
         enrichedOutput.projectMetaData.gitBranch = gitBranch;
         enrichedOutput.projectMetaData.commitId = incomingCommitId;
-        await callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert?llmPlatform=${llmPlatform}`, enrichedOutput);
+        callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert?llmPlatform=${llmPlatform}`, enrichedOutput).then(() => {  }).catch((err) => {
+          console.error("Error sending enriched ontology to Breeze API:", err);
+        });
         console.log("Breeze API response sent");
         cleanupTempDir(tempDir);
-      }).catch((err) => { 
-        console.error("Error generating descriptions or sending to Breeze API:", err);
-        cleanupTempDir(tempDir);
-      });
+      // }).catch((err) => { 
+      //   console.error("Error generating descriptions or sending to Breeze API:", err);
+      //   cleanupTempDir(tempDir);
+      // });
       // await addMetadataAsync(outputJsonPath, tempDir, llmOpts);
 
       // Read back the enriched output
