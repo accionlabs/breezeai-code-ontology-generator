@@ -285,7 +285,7 @@ function isCSharpStdLib(namespace) {
 // -------------------------------------------------------------
 // Analyze C# files
 // -------------------------------------------------------------
-function analyzeCSharpRepo(repoPath) {
+function analyzeCSharpRepo(repoPath, opts = {}) {
   const csFiles = getCSharpFiles(repoPath);
   const totalFiles = csFiles.length;
 
@@ -385,7 +385,7 @@ function analyzeCSharpRepo(repoPath) {
         fqcnIndex,
         methodIndex,
         varTypes
-      });
+      }, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
       results.push({
@@ -425,10 +425,11 @@ if (require.main === module) {
 
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
+  const captureSourceCode = process.argv.includes("--capture-source-code");
 
   console.log(`📂 Scanning C# repo: ${repoPath}`);
 
-  const results = analyzeCSharpRepo(repoPath);
+  const results = analyzeCSharpRepo(repoPath, { captureSourceCode });
 
   console.log(`\n📊 Summary:`);
   console.log(`   Total C# files: ${results.length}\n`);

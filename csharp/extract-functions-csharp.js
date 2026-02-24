@@ -2,8 +2,9 @@ const Parser = require("tree-sitter");
 const CSharp = require("tree-sitter-c-sharp");
 const fs = require("fs");
 const path = require("path");
+const { truncateSourceCode } = require("../utils");
 
-function extractFunctionsWithCalls(filePath, repoPath = null) {
+function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false) {
   const source = fs.readFileSync(filePath, "utf8");
 
   const parser = new Parser();
@@ -19,7 +20,7 @@ function extractFunctionsWithCalls(filePath, repoPath = null) {
       node.type === "constructor_declaration" ||
       node.type === "local_function_statement"
     ) {
-      const funcInfo = extractFunctionInfo(node, filePath, repoPath, source);
+      const funcInfo = extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode);
       if (funcInfo.name) {
         functions.push(funcInfo);
       }
@@ -29,7 +30,7 @@ function extractFunctionsWithCalls(filePath, repoPath = null) {
   return functions;
 }
 
-function extractFunctionInfo(node, filePath, repoPath = null, source) {
+function extractFunctionInfo(node, filePath, repoPath = null, source, captureSourceCode = false) {
   const startLine = node.startPosition.row + 1;
   const endLine = node.endPosition.row + 1;
 
@@ -39,7 +40,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source) {
 
   const { visibility, kind } = getFunctionModifiers(node, source);
 
-  return {
+  const result = {
     name,
     type: getFunctionType(node),
     visibility,
@@ -49,6 +50,12 @@ function extractFunctionInfo(node, filePath, repoPath = null, source) {
     endLine,
     calls
   };
+
+  if (captureSourceCode && source) {
+    result.sourceCode = truncateSourceCode(source.slice(node.startIndex, node.endIndex));
+  }
+
+  return result;
 }
 
 function getFunctionType(node) {
@@ -324,9 +331,9 @@ function resolveCallPath(call, index, currentFilePath) {
   return null;
 }
 
-function extractFunctionsAndCalls(filePath, repoPath, index = {}) {
+function extractFunctionsAndCalls(filePath, repoPath, index = {}, captureSourceCode = false) {
   try {
-    const functions = extractFunctionsWithCalls(filePath, repoPath);
+    const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
     const currentFilePath = path.relative(repoPath, filePath);
 
     // Ensure index has required properties

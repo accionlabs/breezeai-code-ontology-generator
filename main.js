@@ -151,12 +151,12 @@ function detectLanguages(repoPath, verbose = false) {
 // ----------------------------
 // Process a single language
 // ----------------------------
-async function processLanguage(language, repoPath, verbose = false) {
+async function processLanguage(language, repoPath, verbose = false, opts = {}) {
   try {
     console.log(`\n🚀 Processing ${language.name}...`);
 
     // Call the analyzer function directly (no more temp files!)
-    const data = await Promise.resolve(language.analyzer(repoPath));
+    const data = await Promise.resolve(language.analyzer(repoPath, opts));
 
     console.log(`✅ ${language.name} analysis complete!`);
 
@@ -554,7 +554,7 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
     // Step 2: Process each detected language
     const results = [];
     for (const language of detectedLanguages) {
-      const result = await processLanguage(language, repoPath, verbose);
+      const result = await processLanguage(language, repoPath, verbose, opts);
       if (result) {
         results.push(result);
       }

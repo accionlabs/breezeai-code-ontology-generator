@@ -13,9 +13,9 @@ const { extractFunctionsAndCalls, extractReferences } = require("./extract-funct
 const { extractClasses } = require("./extract-classes-salesforce");
 
 // Wrapper function to analyze Salesforce Apex repository
-function analyzeSalesforceRepo(repoPath) {
+function analyzeSalesforceRepo(repoPath, opts = {}) {
   const classIndex = buildClassIndex(repoPath);
-  const analysis = analyzeApexFiles(repoPath, classIndex);
+  const analysis = analyzeApexFiles(repoPath, classIndex, opts);
   return analysis;
 }
 
@@ -193,7 +193,7 @@ function isPrimitiveType(typeName) {
 // -------------------------------------------------------------
 // Step 4: Analyze Apex files
 // -------------------------------------------------------------
-function analyzeApexFiles(repoPath, classIndex) {
+function analyzeApexFiles(repoPath, classIndex, opts = {}) {
   console.log("Started analyzing Apex files...");
   const apexFiles = getApexFiles(repoPath);
 
@@ -261,7 +261,7 @@ function analyzeApexFiles(repoPath, classIndex) {
       }
 
       // Extract functions and classes
-      const functions = extractFunctionsAndCalls(file, repoPath, classIndex);
+      const functions = extractFunctionsAndCalls(file, repoPath, classIndex, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
       results.push({
@@ -302,10 +302,11 @@ if (require.main === module) {
 
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
+  const captureSourceCode = process.argv.includes("--capture-source-code");
 
   console.log(`📂 Scanning Salesforce Apex repo: ${repoPath}`);
 
-  const analysis = analyzeSalesforceRepo(repoPath);
+  const analysis = analyzeSalesforceRepo(repoPath, { captureSourceCode });
   fs.writeFileSync(importsOutput, JSON.stringify(analysis, null, 2));
   console.log(`✅ Final output written to → ${importsOutput}`);
 }

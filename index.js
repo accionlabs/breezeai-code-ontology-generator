@@ -64,7 +64,10 @@ async function run(opts) {
 
   try {
     const scriptPath = path.resolve(__dirname, scriptMap[language]);
-    const command = `node "${scriptPath}" "${repoPath}" "${importsOutput}"`;
+    let command = `node "${scriptPath}" "${repoPath}" "${importsOutput}"`;
+    if (opts.captureSourceCode) {
+      command += " --capture-source-code";
+    }
 
     console.log("\n🚀 Running command:");
     console.log(command);

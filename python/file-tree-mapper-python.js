@@ -80,7 +80,7 @@ function resolveImportPath(importSource, currentFilePath, repoPath) {
 // -------------------------------------------------------------
 // Analyze files with functions and classes
 // -------------------------------------------------------------
-function analyzeFiles(repoPath) {
+function analyzeFiles(repoPath, opts = {}) {
   const pyFiles = getPythonFiles(repoPath);
   const results = [];
   const totalFiles = pyFiles.length;
@@ -122,7 +122,7 @@ function analyzeFiles(repoPath) {
       });
 
       // Extract functions and classes
-      const functions = extractFunctionsAndCalls(file, repoPath);
+      const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
       results.push({
@@ -147,10 +147,10 @@ function analyzeFiles(repoPath) {
 // -------------------------------------------------------------
 // Main export function - to be called from main.js
 // -------------------------------------------------------------
-function analyzePythonRepo(repoPath) {
+function analyzePythonRepo(repoPath, opts = {}) {
   console.log(`📂 Scanning Python repo: ${repoPath}`);
 
-  const analysis = analyzeFiles(repoPath);
+  const analysis = analyzeFiles(repoPath, opts);
 
   console.log(`\n📊 Summary:`);
   console.log(`   Python files: ${analysis.length}`);
@@ -174,8 +174,9 @@ if (require.main === module) {
 
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
+  const captureSourceCode = process.argv.includes("--capture-source-code");
 
-  const results = analyzePythonRepo(repoPath);
+  const results = analyzePythonRepo(repoPath, { captureSourceCode });
 
   // Write results to file
   fs.writeFileSync(importsOutput, JSON.stringify(results, null, 2));

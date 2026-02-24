@@ -44,7 +44,7 @@ function getJsFilesOnly(repoPath) {
 // -------------------------------------------------------------
 // Analyze TypeScript files (.ts, .tsx)
 // -------------------------------------------------------------
-function analyzeTypeScriptFiles(repoPath, pathAliases) {
+function analyzeTypeScriptFiles(repoPath, pathAliases, opts = {}) {
   const tsFiles = getTsFilesOnly(repoPath);
   const results = [];
   const totalFiles = tsFiles.length;
@@ -170,7 +170,7 @@ function analyzeTypeScriptFiles(repoPath, pathAliases) {
       }
 
       // Extract functions and classes
-      const functions = extractFunctionsAndCalls(file, repoPath);
+      const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
       results.push({
@@ -195,11 +195,11 @@ function analyzeTypeScriptFiles(repoPath, pathAliases) {
 // -------------------------------------------------------------
 // Main export function - to be called from main.js
 // -------------------------------------------------------------
-function analyzeTypeScriptRepo(repoPath) {
+function analyzeTypeScriptRepo(repoPath, opts = {}) {
   const pathAliases = loadPathAliases(repoPath);
   console.log(`📂 Scanning TypeScript repo: ${repoPath}`);
 
-  const tsResults = analyzeTypeScriptFiles(repoPath, pathAliases);
+  const tsResults = analyzeTypeScriptFiles(repoPath, pathAliases, opts);
 
   console.log(`\n📊 Summary:`);
   console.log(`   TypeScript files: ${tsResults.length}`);
@@ -223,8 +223,9 @@ if (require.main === module) {
 
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
+  const captureSourceCode = process.argv.includes("--capture-source-code");
 
-  const results = analyzeTypeScriptRepo(repoPath);
+  const results = analyzeTypeScriptRepo(repoPath, { captureSourceCode });
 
   // Write results to file
   fs.writeFileSync(importsOutput, JSON.stringify(results, null, 2));

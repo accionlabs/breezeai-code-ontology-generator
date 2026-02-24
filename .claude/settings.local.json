@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls /mnt/c/Users/aniru/Desktop/Projects/breeze.ai/breeze-code-ontology-generator/*.js /mnt/c/Users/aniru/Desktop/Projects/breeze.ai/breeze-code-ontology-generator/**/*.js 2>/dev/null | grep -v node_modules)",
+      "Bash(find /mnt/c/Users/aniru/Desktop/Projects/breeze.ai/breeze-code-ontology-generator -type f -name \"*.json\" ! -path \"*/node_modules/*\" 2>/dev/null | head -20)",
+      "Bash(node -e \"\nconst {analyzeJavaScriptRepo} = require\\('./nodejs/file-tree-mapper-nodejs.js'\\);\nconst result = analyzeJavaScriptRepo\\('./nodejs'\\);\nconsole.log\\(JSON.stringify\\(result[0], null, 2\\)\\);\n\" 2>/dev/null | head -120)",
+      "Bash(node -e \"const { truncateSourceCode } = require\\('./utils'\\); console.log\\('=== Test 1: Short string ==='\\); console.log\\(truncateSourceCode\\('hello world'\\)\\); console.log\\('=== Test 2: Null ==='\\); console.log\\(truncateSourceCode\\(null\\)\\); console.log\\('=== Test 3: Over 200 lines ==='\\); const longLines = Array\\(250\\).fill\\('line'\\).join\\('\\\\n'\\); const result = truncateSourceCode\\(longLines\\); console.log\\('Lines in result:', result.split\\('\\\\n'\\).length\\); console.log\\('Ends with marker:', result.endsWith\\('// ... [truncated]'\\)\\); console.log\\('=== Test 4: Over 10K chars ==='\\); const longChars = 'x'.repeat\\(15000\\); const result2 = truncateSourceCode\\(longChars\\); console.log\\('Chars in result:', result2.length\\); console.log\\('Ends with marker:', result2.endsWith\\('// ... [truncated]'\\)\\);\")",
+      "Bash(node -e \"\nconst { Command } = require\\('commander'\\);\nconst program = new Command\\(\\);\nprogram.option\\('--capture-source-code', 'test', false\\);\nprogram.parse\\(['node', 'test']\\);\nconsole.log\\('Default value:', program.opts\\(\\).captureSourceCode\\);\n\")"
+    ]
+  }
+}

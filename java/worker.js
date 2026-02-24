@@ -9,13 +9,13 @@ const path = require("path");
 const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-java");
 const { extractClasses } = require("./extract-classes-java");
 
-const { repoPath, files, classIndex } = workerData;
+const { repoPath, files, classIndex, captureSourceCode } = workerData;
 
 // ---------- analyze file using extraction modules ----------
 function analyzeFile(filePath) {
     try {
         const imports = extractImports(filePath, classIndex);
-        const functions = extractFunctionsAndCalls(filePath, repoPath, classIndex);
+        const functions = extractFunctionsAndCalls(filePath, repoPath, classIndex, captureSourceCode);
         const classes = extractClasses(filePath, repoPath);
 
         return {
