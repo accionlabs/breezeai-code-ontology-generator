@@ -6,6 +6,8 @@ const {
   detectLanguages,
   processLanguage,
   mergeLanguageOutputs,
+  mergeProjectMetaData,
+  assembleOutputFromNdjson,
 } = require("./main");
 const { generateDescriptionsAsync, addMetadataAsync } = require("./llm-enrichment");
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
@@ -69,36 +71,53 @@ async function runAnalysis(files, projectName, skeletonPaths, { keepTempDir = fa
       throw err;
     }
 
-    const results = [];
+    // NDJSON mode: process each language incrementally to avoid holding all data in memory.
+    // Each language result is written to NDJSON and discarded before the next language loads.
+    const ndjsonFilePath = path.join(tempDir, 'files.ndjson');
+    fs.writeFileSync(ndjsonFilePath, ''); // Initialize empty NDJSON file
+
+    let accumulatedMetaData = null;
+    let successCount = 0;
+
     for (const language of detectedLanguages) {
       const result = await processLanguage(language, tempDir);
       if (result) {
-        results.push(result);
+        successCount++;
+        const { projectMetaData } = mergeLanguageOutputs([result], tempDir, tempDir, ndjsonFilePath);
+        accumulatedMetaData = accumulatedMetaData
+          ? mergeProjectMetaData(accumulatedMetaData, projectMetaData)
+          : projectMetaData;
+        // result.data is no longer referenced — GC can reclaim before next iteration
       }
     }
 
-    if (results.length === 0) {
+    if (successCount === 0) {
       throw new Error("All language analyzers failed");
     }
 
+    // Config analysis (optional)
     try {
       const configData = analyzeConfigRepo(tempDir);
       if (configData && configData.length > 0) {
-        results.push({
-          language: "config",
-          name: "Configuration Files",
-          data: configData,
-        });
+        const { projectMetaData } = mergeLanguageOutputs(
+          [{ language: "config", name: "Configuration Files", data: configData }],
+          tempDir, tempDir, ndjsonFilePath
+        );
+        accumulatedMetaData = accumulatedMetaData
+          ? mergeProjectMetaData(accumulatedMetaData, projectMetaData)
+          : projectMetaData;
       }
     } catch (_) {
       // Config analysis is optional, continue without it
     }
 
-    const { data: output } = mergeLanguageOutputs(results, tempDir, tempDir);
-
     const name = projectName || "untitled-project";
-    output.projectMetaData.repositoryPath = name;
-    output.projectMetaData.repositoryName = name;
+    accumulatedMetaData.repositoryPath = name;
+    accumulatedMetaData.repositoryName = name;
+
+    // Assemble final JSON from NDJSON
+    const outputPath = path.join(tempDir, `${path.basename(tempDir)}-project-analysis.json`);
+    const output = assembleOutputFromNdjson(ndjsonFilePath, accumulatedMetaData, outputPath);
 
     if (keepTempDir) {
       shouldCleanup = false;
@@ -193,6 +212,7 @@ app.post("/api/analyze", async (req, res) => {
 
 // Git diff analysis endpoint
 app.post("/api/analyze-diff", async (req, res) => {
+  console.log("i am triggered")
   const { repoUrl, currentCommitId, incomingCommitId, gitToken, gitBranch, projectUuid, codeOntologyId } =
     req.body;
 
@@ -346,19 +366,19 @@ app.post("/api/analyze-diff", async (req, res) => {
       // Generate descriptions and metadata using the specified LLM platform
       const llmOpts = getLlmOpts(llmPlatform);
       // generateDescriptionsAsync(outputJsonPath, tempDir, llmOpts).then(async () => {
-         const enrichedOutput = JSON.parse(fs.readFileSync(outputJsonPath, "utf-8"));
+      const enrichedOutput = JSON.parse(fs.readFileSync(outputJsonPath, "utf-8"));
 
-        enrichedOutput.deletedFiles = deletedFiles;
-        enrichedOutput.projectUuid = projectUuid;
-        enrichedOutput.codeOntologyId = codeOntologyId;
-        enrichedOutput.projectMetaData.repoUrl = repoUrl;
-        enrichedOutput.projectMetaData.gitBranch = gitBranch;
-        enrichedOutput.projectMetaData.commitId = incomingCommitId;
-        callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert?llmPlatform=${llmPlatform}`, enrichedOutput).then(() => {  }).catch((err) => {
-          console.error("Error sending enriched ontology to Breeze API:", err);
-        });
-        console.log("Breeze API response sent");
-        cleanupTempDir(tempDir);
+      enrichedOutput.deletedFiles = deletedFiles;
+      enrichedOutput.projectUuid = projectUuid;
+      enrichedOutput.codeOntologyId = codeOntologyId;
+      enrichedOutput.projectMetaData.repoUrl = repoUrl;
+      enrichedOutput.projectMetaData.gitBranch = gitBranch;
+      enrichedOutput.projectMetaData.commitId = incomingCommitId;
+      callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert?llmPlatform=${llmPlatform}`, enrichedOutput).then(() => { }).catch((err) => {
+        console.error("Error sending enriched ontology to Breeze API:", err);
+      });
+      console.log("Breeze API response sent", enrichedOutput);
+      //cleanupTempDir(tempDir);
       // }).catch((err) => { 
       //   console.error("Error generating descriptions or sending to Breeze API:", err);
       //   cleanupTempDir(tempDir);
@@ -366,9 +386,9 @@ app.post("/api/analyze-diff", async (req, res) => {
       // await addMetadataAsync(outputJsonPath, tempDir, llmOpts);
 
       // Read back the enriched output
-     
 
-      res.json({ success: true, message: "Code ontology "+ "generated and sent to Breeze API for upsert. Enrichment is done asynchronously and may take additional time." });
+
+      res.json({ success: true, message: "Code ontology " + "generated and sent to Breeze API for upsert. Enrichment is done asynchronously and may take additional time." });
     } catch (err) {
       throw err
     }
