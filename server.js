@@ -74,6 +74,7 @@ async function runAnalysis(files, projectName, skeletonPaths, { keepTempDir = fa
     // NDJSON mode: process each language incrementally to avoid holding all data in memory.
     // Each language result is written to NDJSON and discarded before the next language loads.
     const ndjsonFilePath = path.join(tempDir, 'files.ndjson');
+    console.log(`Using NDJSON file for incremental output: ${ndjsonFilePath}`);
     fs.writeFileSync(ndjsonFilePath, ''); // Initialize empty NDJSON file
 
     let accumulatedMetaData = null;
@@ -212,7 +213,6 @@ app.post("/api/analyze", async (req, res) => {
 
 // Git diff analysis endpoint
 app.post("/api/analyze-diff", async (req, res) => {
-  console.log("i am triggered")
   const { repoUrl, currentCommitId, incomingCommitId, gitToken, gitBranch, projectUuid, codeOntologyId } =
     req.body;
 
@@ -359,33 +359,19 @@ app.post("/api/analyze-diff", async (req, res) => {
         output.files = output.files.filter((f) => changedPaths.has(f.path));
       }
 
-      // Write output to temp JSON file for description/metadata generation
-      const outputJsonPath = path.join(tempDir, `${repo}-project-analysis.json`);
-      fs.writeFileSync(outputJsonPath, JSON.stringify(output, null, 2));
-
-      // Generate descriptions and metadata using the specified LLM platform
+      // Enrich output with diff metadata and send to Breeze API
       const llmOpts = getLlmOpts(llmPlatform);
-      // generateDescriptionsAsync(outputJsonPath, tempDir, llmOpts).then(async () => {
-      const enrichedOutput = JSON.parse(fs.readFileSync(outputJsonPath, "utf-8"));
-
-      enrichedOutput.deletedFiles = deletedFiles;
-      enrichedOutput.projectUuid = projectUuid;
-      enrichedOutput.codeOntologyId = codeOntologyId;
-      enrichedOutput.projectMetaData.repoUrl = repoUrl;
-      enrichedOutput.projectMetaData.gitBranch = gitBranch;
-      enrichedOutput.projectMetaData.commitId = incomingCommitId;
-      callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert?llmPlatform=${llmPlatform}`, enrichedOutput).then(() => { }).catch((err) => {
+      output.deletedFiles = deletedFiles;
+      output.projectUuid = projectUuid;
+      output.codeOntologyId = codeOntologyId;
+      output.projectMetaData.repoUrl = repoUrl;
+      output.projectMetaData.gitBranch = gitBranch;
+      output.projectMetaData.commitId = incomingCommitId;
+      callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert?llmPlatform=${llmPlatform}`, output).then(() => { }).catch((err) => {
         console.error("Error sending enriched ontology to Breeze API:", err);
       });
-      console.log("Breeze API response sent", enrichedOutput);
-      //cleanupTempDir(tempDir);
-      // }).catch((err) => { 
-      //   console.error("Error generating descriptions or sending to Breeze API:", err);
-      //   cleanupTempDir(tempDir);
-      // });
-      // await addMetadataAsync(outputJsonPath, tempDir, llmOpts);
-
-      // Read back the enriched output
+      console.log("Breeze API response sent");
+      cleanupTempDir(tempDir);
 
 
       res.json({ success: true, message: "Code ontology " + "generated and sent to Breeze API for upsert. Enrichment is done asynchronously and may take additional time." });
