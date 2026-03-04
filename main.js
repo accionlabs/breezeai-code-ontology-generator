@@ -170,13 +170,20 @@ async function processLanguage(language, repoPath, verbose = false) {
 // ----------------------------
 // Merge all language outputs into single JSON
 // ----------------------------
-function mergeLanguageOutputs(languageResults, repoPath, outputDir, ndjsonPath) {
+function mergeLanguageOutputs(languageResults, repoPath, outputDir, ndjsonTarget, filterPaths) {
   console.log("\n🔄 Merging all language outputs...");
 
-  // When ndjsonPath is provided, stream file objects to NDJSON file instead of accumulating in memory.
-  // The caller is responsible for initializing the NDJSON file before the first call.
-  const mergedFiles = ndjsonPath ? null : [];
+  // ndjsonTarget can be a writable stream, a file path string, or falsy (in-memory mode).
+  const isStream = ndjsonTarget && typeof ndjsonTarget.write === 'function';
+  const isFilePath = ndjsonTarget && typeof ndjsonTarget === 'string';
+  const mergedFiles = (isStream || isFilePath) ? null : [];
   let totalFilesCount = 0;
+
+  function writeNdjsonLine(obj) {
+    if (isStream) ndjsonTarget.write(JSON.stringify(obj) + '\n');
+    else if (isFilePath) fs.appendFileSync(ndjsonTarget, JSON.stringify(obj) + '\n');
+    else mergedFiles.push(obj);
+  }
   const analyzedLanguages = [];
   let totalFunctions = 0;
   let totalClasses = 0;
@@ -247,12 +254,10 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir, ndjsonPath) 
               metadata
             };
 
-            if (ndjsonPath) {
-              fs.appendFileSync(ndjsonPath, JSON.stringify(configFileData) + '\n');
-            } else {
-              mergedFiles.push(configFileData);
+            if (!filterPaths || filterPaths.has(file.path)) {
+              writeNdjsonLine(configFileData);
+              totalFilesCount++;
             }
-            totalFilesCount++;
             configStats.totalConfigFiles++;
 
             // Count by type
@@ -345,12 +350,10 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir, ndjsonPath) 
               loc
             };
 
-            if (ndjsonPath) {
-              fs.appendFileSync(ndjsonPath, JSON.stringify(codeFileData) + '\n');
-            } else {
-              mergedFiles.push(codeFileData);
+            if (!filterPaths || filterPaths.has(file.path)) {
+              writeNdjsonLine(codeFileData);
+              totalFilesCount++;
             }
-            totalFilesCount++;
 
             // Count files by language
             if (!languageFileCount[result.language]) {
@@ -426,9 +429,9 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir, ndjsonPath) 
     }
   }
 
-  if (ndjsonPath) {
+  if (isStream || isFilePath) {
     // NDJSON mode: don't build the full output in memory, return metadata separately
-    return { outputPath: mergedOutputPath, projectMetaData, ndjsonPath };
+    return { outputPath: mergedOutputPath, projectMetaData, ndjsonPath: isFilePath ? ndjsonTarget : null };
   }
 
   // Legacy mode: build full output in memory

@@ -13,6 +13,7 @@ const { generateDescriptionsAsync, addMetadataAsync } = require("./llm-enrichmen
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
 const { BREEZE_API_URL } = require("./app-config");
 const callHttp = require("./call-http");
+const { createS3UploadStream } = require("./s3-upload");
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -170,6 +171,200 @@ function getLlmOpts(llmPlatform) {
   return platformMap[platform] || platformMap.AWSBEDROCK;
 }
 
+/**
+ * Resolve the Git diff, fetch file contents from GitHub one at a time,
+ * and write them directly to a temp dir (content never accumulates in memory).
+ *
+ * @returns {{ tempDir: string, filterSet: Set<string>, deletedFiles: string[] }}
+ */
+async function resolveGitDiff({ owner, repo, currentCommitId, incomingCommitId, gitBranch, gitToken }) {
+  // Fetch full directory tree at incomingCommitId for path resolution
+  const tree = await githubApi(
+    `/repos/${owner}/${repo}/git/trees/${incomingCommitId}?recursive=1`,
+    gitToken
+  );
+  const skeletonPaths = (tree.tree || [])
+    .filter((entry) => entry.type === "blob")
+    .map((entry) => entry.path);
+
+  let changedFilePaths = [];
+  let deletedFiles = [];
+
+  const hasCurrentCommit = currentCommitId && currentCommitId !== "null" && currentCommitId !== "undefined";
+
+  if (hasCurrentCommit) {
+    const comparison = await githubApi(
+      `/repos/${owner}/${repo}/compare/${currentCommitId}...${incomingCommitId}`,
+      gitToken
+    );
+
+    const ghFiles = comparison.files || [];
+    deletedFiles = ghFiles
+      .filter((f) => f.status === "removed")
+      .map((f) => f.filename);
+    const changedFiles = ghFiles.filter((f) => f.status !== "removed");
+
+    if (changedFiles.length === 0) {
+      const err = new Error("No changed files found between the two commits");
+      err.statusCode = 422;
+      err.deletedFiles = deletedFiles;
+      throw err;
+    }
+
+    changedFilePaths = changedFiles.map((cf) => cf.filename);
+  } else {
+    console.log("No currentCommitId provided, fetching all files up to incomingCommitId on branch", gitBranch);
+    const repoInfo = await githubApi(`/repos/${owner}/${repo}`, gitToken);
+    const defaultBranch = repoInfo.default_branch;
+
+    const commits = await githubApi(
+      `/repos/${owner}/${repo}/commits?sha=${incomingCommitId}&per_page=1`,
+      gitToken
+    );
+
+    if (commits.length > 0) {
+      let comparison;
+      try {
+        comparison = await githubApi(
+          `/repos/${owner}/${repo}/compare/${defaultBranch}...${incomingCommitId}`,
+          gitToken
+        );
+      } catch (_) {
+        comparison = null;
+      }
+
+      if (comparison && comparison.files && comparison.files.length > 0) {
+        const ghFiles = comparison.files;
+        deletedFiles = ghFiles
+          .filter((f) => f.status === "removed")
+          .map((f) => f.filename);
+        changedFilePaths = ghFiles
+          .filter((f) => f.status !== "removed")
+          .map((f) => f.filename);
+      } else {
+        changedFilePaths = skeletonPaths;
+      }
+    }
+
+    if (changedFilePaths.length === 0) {
+      const err = new Error("No changed files found on the branch up to the specified commit");
+      err.statusCode = 422;
+      throw err;
+    }
+  }
+
+  // Write skeleton placeholders + fetch changed files to temp dir
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ontology-"));
+  console.log(`Temp directory created: ${tempDir}`);
+
+  for (const sp of skeletonPaths) {
+    const fullPath = path.join(tempDir, sp);
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+    fs.writeFileSync(fullPath, "");
+  }
+
+  const filterSet = new Set();
+  for (const filePath of changedFilePaths) {
+    try {
+      const contentData = await githubApi(
+        `/repos/${owner}/${repo}/contents/${encodeURIComponent(filePath)}?ref=${incomingCommitId}`,
+        gitToken
+      );
+      const content = Buffer.from(contentData.content, "base64").toString("utf-8");
+      const fullPath = path.join(tempDir, filePath);
+      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      fs.writeFileSync(fullPath, content);
+      filterSet.add(filePath);
+    } catch (err) {
+      console.warn(`Skipping binary/unreadable file: ${filePath}`);
+    }
+  }
+
+  return { tempDir, filterSet, deletedFiles };
+}
+
+/**
+ * Streaming analysis for diff mode: writes NDJSON.gz directly to S3.
+ * No local JSON assembly — each file node streams through gzip to S3.
+ *
+ * Expects a pre-populated tempDir from resolveGitDiff().
+ */
+async function runAnalysisDiffStream({ tempDir, filterSet, s3Key, repo }) {
+  try {
+    if (filterSet.size === 0) {
+      const err = new Error("No readable files could be fetched from GitHub");
+      err.statusCode = 422;
+      throw err;
+    }
+
+    const detectedLanguages = detectLanguages(tempDir);
+    if (detectedLanguages.length === 0) {
+      const err = new Error("No supported languages detected in the provided files");
+      err.statusCode = 422;
+      throw err;
+    }
+
+    // Create S3 streaming pipeline
+    const { passThrough, uploadPromise } = createS3UploadStream(s3Key);
+    console.log(`Streaming NDJSON.gz to S3: ${s3Key}`);
+
+    let accumulatedMetaData = null;
+    let successCount = 0;
+
+    for (const language of detectedLanguages) {
+      const result = await processLanguage(language, tempDir);
+      if (result) {
+        successCount++;
+        const { projectMetaData } = mergeLanguageOutputs([result], tempDir, tempDir, passThrough, filterSet);
+        accumulatedMetaData = accumulatedMetaData
+          ? mergeProjectMetaData(accumulatedMetaData, projectMetaData)
+          : projectMetaData;
+        // result.data is no longer referenced — GC can reclaim before next iteration
+      }
+    }
+
+    if (successCount === 0) {
+      passThrough.end();
+      throw new Error("All language analyzers failed");
+    }
+
+    // Config analysis (optional)
+    try {
+      const configData = analyzeConfigRepo(tempDir);
+      if (configData && configData.length > 0) {
+        const { projectMetaData } = mergeLanguageOutputs(
+          [{ language: "config", name: "Configuration Files", data: configData }],
+          tempDir, tempDir, passThrough, filterSet
+        );
+        accumulatedMetaData = accumulatedMetaData
+          ? mergeProjectMetaData(accumulatedMetaData, projectMetaData)
+          : projectMetaData;
+      }
+    } catch (_) {
+      // Config analysis is optional, continue without it
+    }
+
+    const name = repo || "untitled-project";
+    accumulatedMetaData.repositoryPath = name;
+    accumulatedMetaData.repositoryName = name;
+
+    // Signal end of stream — flushes gzip and completes S3 multipart upload
+    passThrough.end();
+    await uploadPromise;
+
+    return { projectMetaData: accumulatedMetaData };
+  } finally {
+    if (tempDir) {
+      console.log(`Cleaning up temp directory: ${tempDir}`);
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch (_) {
+        // best-effort cleanup
+      }
+    }
+  }
+}
+
 // --- Routes ---
 
 // Health check
@@ -230,158 +425,53 @@ app.post("/api/analyze-diff", async (req, res) => {
   }
   const { owner, repo } = parsed;
 
-  // Treat "null", "undefined", empty string as no currentCommitId
-  const hasCurrentCommit = currentCommitId && currentCommitId !== "null" && currentCommitId !== "undefined";
-
   try {
-    // Fetch full directory tree at incomingCommitId for path resolution
-    const tree = await githubApi(
-      `/repos/${owner}/${repo}/git/trees/${incomingCommitId}?recursive=1`,
-      gitToken
-    );
-    const skeletonPaths = (tree.tree || [])
-      .filter((entry) => entry.type === "blob")
-      .map((entry) => entry.path);
+    const { tempDir, filterSet, deletedFiles } = await resolveGitDiff({
+      owner, repo, currentCommitId, incomingCommitId, gitBranch, gitToken,
+    });
 
-    let files = [];
-    let deletedFiles = [];
-
-    if (hasCurrentCommit) {
-      // Compare the two commits
-      const comparison = await githubApi(
-        `/repos/${owner}/${repo}/compare/${currentCommitId}...${incomingCommitId}`,
-        gitToken
-      );
-
-      const ghFiles = comparison.files || [];
-      deletedFiles = ghFiles
-        .filter((f) => f.status === "removed")
-        .map((f) => f.filename);
-      const changedFiles = ghFiles.filter((f) => f.status !== "removed");
-
-      if (changedFiles.length === 0) {
-        return res.status(422).json({
-          error: "No changed files found between the two commits",
-          deletedFiles,
-        });
-      }
-
-      // Fetch content for each changed file
-      for (const cf of changedFiles) {
-        const contentData = await githubApi(
-          `/repos/${owner}/${repo}/contents/${encodeURIComponent(cf.filename)}?ref=${incomingCommitId}`,
-          gitToken
-        );
-        const content = Buffer.from(contentData.content, "base64").toString(
-          "utf-8"
-        );
-        files.push({ path: cf.filename, content });
-      }
-    } else {
-      // No currentCommitId — fetch all changes on the branch up to incomingCommitId
-      // Get repo's default branch to use as the base for comparison
-
-      console.log("No currentCommitId provided, fetching all files up to incomingCommitId on branch", gitBranch);
-      const repoInfo = await githubApi(`/repos/${owner}/${repo}`, gitToken);
-      const defaultBranch = repoInfo.default_branch;
-
-      // List commits on the branch to find the very first commit
-      const commits = await githubApi(
-        `/repos/${owner}/${repo}/commits?sha=${incomingCommitId}&per_page=1`,
-        gitToken
-      );
-
-      if (commits.length > 0) {
-        let comparison;
-        try {
-          // Compare default branch with incomingCommitId to get all branch changes
-          comparison = await githubApi(
-            `/repos/${owner}/${repo}/compare/${defaultBranch}...${incomingCommitId}`,
-            gitToken
-          );
-        } catch (_) {
-          // If compare fails (e.g. branch IS the default branch or no common ancestor),
-          // fall back to fetching all files from the tree
-          comparison = null;
-        }
-
-        if (comparison && comparison.files && comparison.files.length > 0) {
-          const ghFiles = comparison.files;
-          deletedFiles = ghFiles
-            .filter((f) => f.status === "removed")
-            .map((f) => f.filename);
-          const changedFiles = ghFiles.filter((f) => f.status !== "removed");
-
-          for (const cf of changedFiles) {
-            const contentData = await githubApi(
-              `/repos/${owner}/${repo}/contents/${encodeURIComponent(cf.filename)}?ref=${incomingCommitId}`,
-              gitToken
-            );
-            const content = Buffer.from(contentData.content, "base64").toString(
-              "utf-8"
-            );
-            files.push({ path: cf.filename, content });
-          }
-        } else {
-          // Fallback: fetch all files from the tree at incomingCommitId
-          const allBlobs = skeletonPaths;
-          for (const blobPath of allBlobs) {
-            try {
-              const contentData = await githubApi(
-                `/repos/${owner}/${repo}/contents/${encodeURIComponent(blobPath)}?ref=${incomingCommitId}`,
-                gitToken
-              );
-              const content = Buffer.from(contentData.content, "base64").toString(
-                "utf-8"
-              );
-              files.push({ path: blobPath, content });
-            } catch (err) {
-              console.warn(`Skipping binary/unreadable file: ${blobPath}`);
-            }
-          }
-        }
-      }
-
-      if (files.length === 0) {
-        return res.status(422).json({
-          error: "No changed files found on the branch up to the specified commit",
-        });
-      }
-    }
-
-    const changedPaths = new Set(files.map((f) => f.path));
     const llmPlatform = req.query.llmPlatform || "AWSBEDROCK";
-    const { output, tempDir } = await runAnalysis(files, repo, skeletonPaths, { keepTempDir: true });
+    const s3Key = `code-ontology/${projectUuid}/${incomingCommitId}.ndjson.gz`;
 
-    try {
-      // Keep only changed files in the output, not skeleton placeholders
-      if (output.files) {
-        output.files = output.files.filter((f) => changedPaths.has(f.path));
+    const { projectMetaData } = await runAnalysisDiffStream({
+      tempDir, filterSet, s3Key, repo,
+    });
+
+    projectMetaData.repoUrl = repoUrl;
+    projectMetaData.gitBranch = gitBranch;
+    projectMetaData.commitId = incomingCommitId;
+
+    // POST lightweight notification with S3 key + metadata
+    callHttp.httpPost(
+      `${BREEZE_API_URL}/code-ontology/stream-ingest?llmPlatform=${llmPlatform}`,
+      {
+        s3Key,
+        projectMetaData,
+        deletedFiles,
+        projectUuid,
+        codeOntologyId,
+        repoUrl,
+        gitBranch,
+        commitId: incomingCommitId,
+        llmPlatform,
       }
+    ).then(() => {
+      console.log("stream-ingest notification sent to Breeze API");
+    }).catch((err) => {
+      console.error("Error sending stream-ingest notification to Breeze API:", err);
+    });
 
-      // Enrich output with diff metadata and send to Breeze API
-      const llmOpts = getLlmOpts(llmPlatform);
-      output.deletedFiles = deletedFiles;
-      output.projectUuid = projectUuid;
-      output.codeOntologyId = codeOntologyId;
-      output.projectMetaData.repoUrl = repoUrl;
-      output.projectMetaData.gitBranch = gitBranch;
-      output.projectMetaData.commitId = incomingCommitId;
-      callHttp.httpPut(`${BREEZE_API_URL}/code-ontology/upsert?llmPlatform=${llmPlatform}`, output).then(() => { }).catch((err) => {
-        console.error("Error sending enriched ontology to Breeze API:", err);
-      });
-      console.log("Breeze API response sent");
-      cleanupTempDir(tempDir);
-
-
-      res.json({ success: true, message: "Code ontology " + "generated and sent to Breeze API for upsert. Enrichment is done asynchronously and may take additional time." });
-    } catch (err) {
-      throw err
-    }
+    res.json({
+      success: true,
+      s3Key,
+      message: "Code ontology streamed to S3 and notification sent to Breeze API for ingestion.",
+    });
   } catch (err) {
     console.error("Analyze-diff error:", err);
     const status = err.statusCode || 500;
-    res.status(status).json({ error: err.message });
+    const body = { error: err.message };
+    if (err.deletedFiles) body.deletedFiles = err.deletedFiles;
+    res.status(status).json(body);
   }
 });
 
