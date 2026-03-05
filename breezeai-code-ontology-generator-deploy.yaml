@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${MICROSERVICE_NAME}
+  labels:
+    app: ${MICROSERVICE_NAME}
+    com.breeze.project: Breeze
+spec:
+  replicas: ${REPLICAS}
+  selector:
+    matchLabels:
+      app: ${MICROSERVICE_NAME}
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: ${MICROSERVICE_NAME}
+    spec:
+      containers:
+        - name: ${MICROSERVICE_NAME}
+          image: ${AWS_ACCOUNT_NUMBER}.dkr.ecr.${REGION}.amazonaws.com/${CLIENT_NAME}/${ENV}/${MICROSERVICE_NAME}:${TAG}
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: ${MICROSERVICE_NAME}
+            - secretRef:
+                name: ${SECRET}
+          resources:
+            requests:
+              cpu: ${MIN_CPU}
+              memory: ${MIN_MEM}
+            limits:
+              cpu: ${MAX_CPU}
+              memory: ${MAX_MEM}
+          ports:
+            - name: http
+              containerPort: 3000
+          volumeMounts:
+            - name: logs
+              mountPath: /logs
+      volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: ${MICROSERVICES_PVC}
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${MICROSERVICE_NAME}
+  labels:
+    app: ${MICROSERVICE_NAME}
+  annotations:
+    com.breeze.env: development
+    com.breeze.project: Breeze
+spec:
+  type: NodePort
+  selector:
+    app: ${MICROSERVICE_NAME}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${MICROSERVICE_NAME}-ing
+  namespace: ${NAMESPACE}
+  annotations:
+    konghq.com/plugins: cors
+    konghq.com/strip-path: "true"
+    plugins.konghq.com: jwt, cors
+spec:
+  ingressClassName: kong
+  rules:
+    - host: ${ENVIRONMENT_URL}
+      http:
+        paths:
+          - path: ${ENV_CONTEXT_PATH}
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: ${MICROSERVICE_NAME}
+                port:
+                  number: 3000
