@@ -9,7 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const glob = require("glob");
 const Parser = require("tree-sitter");
-const PHP = require("tree-sitter-php");
+const PHP = require("tree-sitter-php").php;
 const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-php");
 const { extractClasses } = require("./extract-classes-php");
 
@@ -21,26 +21,30 @@ function getPHPFiles(repoPath) {
     ignore: [
       `${repoPath}/**/vendor/**`,           // Composer dependencies
       `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/storage/**`,           // Laravel storage
-      `${repoPath}/**/bootstrap/cache/**`,   // Laravel cache
+      `${repoPath}/**/storage/**`,          // Laravel storage
+      `${repoPath}/**/bootstrap/cache/**`,  // Laravel cache
       `${repoPath}/**/cache/**`,
       `${repoPath}/**/.phpunit.cache/**`,
-      `${repoPath}/**/var/**`                // Symfony var directory
+      `${repoPath}/**/build/**`,
+      `${repoPath}/**/dist/**`,
+      `${repoPath}/**/_ide_helper*.php`,    // IDE helper files
+      `${repoPath}/**/*.blade.php`          // Blade templates (optional)
     ]
   });
 }
 
 // -------------------------------------------------------------
 // Build comprehensive class index
-// Maps: className -> file, namespace\className -> file, methodName -> [files]
+// Maps: className -> file, FQCN -> file, methodName -> [files]
 // -------------------------------------------------------------
 function buildClassIndex(files, repoPath) {
   const classIndex = {};      // className -> [file paths]
   const fqcnIndex = {};       // Namespace\ClassName -> [file paths]
   const methodIndex = {};     // methodName -> [{ className, filePath }]
+  const functionIndex = {};   // functionName -> [file paths]
 
   const parser = new Parser();
-  parser.setLanguage(PHP.php);
+  parser.setLanguage(PHP);
 
   files.forEach(file => {
     try {
@@ -56,19 +60,41 @@ function buildClassIndex(files, repoPath) {
           const nameNode = node.childForFieldName("name");
           if (nameNode) {
             currentNamespace = source.slice(nameNode.startIndex, nameNode.endIndex);
+          } else {
+            // Try to find namespace_name
+            for (let i = 0; i < node.childCount; i++) {
+              const child = node.child(i);
+              if (child.type === "namespace_name" || child.type === "qualified_name") {
+                currentNamespace = source.slice(child.startIndex, child.endIndex);
+                break;
+              }
+            }
           }
         }
 
-        // Extract class/interface/trait names and their methods
+        // Extract class/interface/trait/enum names and their methods
         if (
           node.type === "class_declaration" ||
           node.type === "interface_declaration" ||
           node.type === "trait_declaration" ||
           node.type === "enum_declaration"
         ) {
+          let className = null;
           const nameNode = node.childForFieldName("name");
           if (nameNode) {
-            const className = source.slice(nameNode.startIndex, nameNode.endIndex);
+            className = source.slice(nameNode.startIndex, nameNode.endIndex);
+          } else {
+            // Try to find name child
+            for (let i = 0; i < node.childCount; i++) {
+              const child = node.child(i);
+              if (child.type === "name") {
+                className = source.slice(child.startIndex, child.endIndex);
+                break;
+              }
+            }
+          }
+
+          if (className) {
             const fqcn = currentNamespace ? `${currentNamespace}\\${className}` : className;
 
             // Map class name to file
@@ -83,10 +109,57 @@ function buildClassIndex(files, repoPath) {
             }
             fqcnIndex[fqcn].push(relativePath);
 
-            // Extract methods from this class
-            const body = node.childForFieldName("body");
-            if (body) {
-              extractMethodsFromBody(body, source, className, relativePath, methodIndex);
+            // Extract methods from this class/interface/trait
+            extractMethodsFromNode(node, source, className, relativePath, methodIndex);
+          }
+        }
+
+        // Extract standalone functions
+        if (node.type === "function_definition") {
+          // Make sure it's not inside a class
+          let isMethod = false;
+          let parent = node.parent;
+          while (parent) {
+            if (
+              parent.type === "class_declaration" ||
+              parent.type === "interface_declaration" ||
+              parent.type === "trait_declaration"
+            ) {
+              isMethod = true;
+              break;
+            }
+            parent = parent.parent;
+          }
+
+          if (!isMethod) {
+            let funcName = null;
+            const nameNode = node.childForFieldName("name");
+            if (nameNode) {
+              funcName = source.slice(nameNode.startIndex, nameNode.endIndex);
+            } else {
+              for (let i = 0; i < node.childCount; i++) {
+                const child = node.child(i);
+                if (child.type === "name") {
+                  funcName = source.slice(child.startIndex, child.endIndex);
+                  break;
+                }
+              }
+            }
+
+            if (funcName) {
+              if (!functionIndex[funcName]) {
+                functionIndex[funcName] = [];
+              }
+              functionIndex[funcName].push(relativePath);
+
+              // Also add to methodIndex for resolution
+              if (!methodIndex[funcName]) {
+                methodIndex[funcName] = [];
+              }
+              methodIndex[funcName].push({
+                className: null,
+                filePath: relativePath
+              });
             }
           }
         }
@@ -96,19 +169,44 @@ function buildClassIndex(files, repoPath) {
     }
   });
 
-  return { classIndex, fqcnIndex, methodIndex };
+  return { classIndex, fqcnIndex, methodIndex, functionIndex };
 }
 
-function extractMethodsFromBody(body, source, className, filePath, methodIndex) {
+function extractMethodsFromNode(classNode, source, className, filePath, methodIndex) {
+  // Find declaration_list (class body)
+  let body = classNode.childForFieldName("body");
+  if (!body) {
+    for (let i = 0; i < classNode.childCount; i++) {
+      const child = classNode.child(i);
+      if (child.type === "declaration_list") {
+        body = child;
+        break;
+      }
+    }
+  }
+
+  if (!body) return;
+
   for (let i = 0; i < body.childCount; i++) {
     const member = body.child(i);
     if (!member.isNamed) continue;
 
     if (member.type === "method_declaration") {
+      let methodName = null;
       const nameNode = member.childForFieldName("name");
       if (nameNode) {
-        const methodName = source.slice(nameNode.startIndex, nameNode.endIndex);
+        methodName = source.slice(nameNode.startIndex, nameNode.endIndex);
+      } else {
+        for (let j = 0; j < member.childCount; j++) {
+          const child = member.child(j);
+          if (child.type === "name") {
+            methodName = source.slice(child.startIndex, child.endIndex);
+            break;
+          }
+        }
+      }
 
+      if (methodName) {
         if (!methodIndex[methodName]) {
           methodIndex[methodName] = [];
         }
@@ -129,21 +227,85 @@ function traverse(node, cb) {
 }
 
 // -------------------------------------------------------------
-// Resolve use directive to local file or external package
+// Extract variable types from a file
 // -------------------------------------------------------------
-function resolveUseDirective(useNamespace, fqcnIndex, classIndex) {
+function extractVariableTypes(tree, source) {
+  const varTypes = {};
+
+  traverse(tree.rootNode, (node) => {
+    // Property declarations with type hints
+    if (node.type === "property_declaration") {
+      const typeNode = node.childForFieldName("type");
+      if (typeNode) {
+        const typeName = source.slice(typeNode.startIndex, typeNode.endIndex);
+
+        // Find property elements
+        traverse(node, (n) => {
+          if (n.type === "property_element") {
+            const nameNode = n.childForFieldName("name");
+            if (nameNode) {
+              let varName = source.slice(nameNode.startIndex, nameNode.endIndex);
+              if (varName.startsWith("$")) {
+                varName = varName.substring(1);
+              }
+              varTypes[varName] = typeName;
+            }
+          }
+        });
+      }
+    }
+
+    // Constructor parameter promotion (PHP 8.0+)
+    if (node.type === "property_promotion_parameter") {
+      const typeNode = node.childForFieldName("type");
+      const nameNode = node.childForFieldName("name");
+      if (typeNode && nameNode) {
+        const typeName = source.slice(typeNode.startIndex, typeNode.endIndex);
+        let varName = source.slice(nameNode.startIndex, nameNode.endIndex);
+        if (varName.startsWith("$")) {
+          varName = varName.substring(1);
+        }
+        varTypes[varName] = typeName;
+      }
+    }
+
+    // Method/function parameters with type hints
+    if (node.type === "simple_parameter") {
+      const typeNode = node.childForFieldName("type");
+      const nameNode = node.childForFieldName("name");
+      if (typeNode && nameNode) {
+        const typeName = source.slice(typeNode.startIndex, typeNode.endIndex);
+        let varName = source.slice(nameNode.startIndex, nameNode.endIndex);
+        if (varName.startsWith("$")) {
+          varName = varName.substring(1);
+        }
+        varTypes[varName] = typeName;
+      }
+    }
+  });
+
+  return varTypes;
+}
+
+// -------------------------------------------------------------
+// Resolve use statement to local file or external package
+// -------------------------------------------------------------
+function resolveUseStatement(useNamespace, fqcnIndex, classIndex) {
+  // Normalize namespace separators
+  const normalizedNamespace = useNamespace.replace(/\//g, "\\");
+
   // Check if it's a direct FQCN match
-  if (fqcnIndex[useNamespace]) {
+  if (fqcnIndex[normalizedNamespace]) {
     return {
       type: "local",
-      files: fqcnIndex[useNamespace]
+      files: fqcnIndex[normalizedNamespace]
     };
   }
 
-  // Check if it's a partial match
+  // Check if it's a partial match (importing a namespace that contains our classes)
   const matchingFiles = [];
   Object.entries(fqcnIndex).forEach(([fqcn, files]) => {
-    if (fqcn.startsWith(useNamespace + "\\") || fqcn === useNamespace) {
+    if (fqcn.startsWith(normalizedNamespace + "\\") || fqcn === normalizedNamespace) {
       matchingFiles.push(...files);
     }
   });
@@ -155,39 +317,127 @@ function resolveUseDirective(useNamespace, fqcnIndex, classIndex) {
     };
   }
 
+  // Check by class name only (last part of namespace)
+  const lastPart = normalizedNamespace.split("\\").pop();
+  if (classIndex[lastPart]) {
+    return {
+      type: "local",
+      files: classIndex[lastPart]
+    };
+  }
+
   return {
     type: "external",
-    namespace: useNamespace
+    namespace: normalizedNamespace
   };
 }
 
 // -------------------------------------------------------------
-// Check if namespace is a common external/framework package
+// Check if namespace is PHP standard library or common external
 // -------------------------------------------------------------
-function isPHPStdLibOrFramework(namespace) {
-  const externalPrefixes = [
-    // Composer packages and common frameworks
-    "Illuminate",      // Laravel
-    "Symfony",
-    "Doctrine",
-    "PHPUnit",
-    "Psr",             // PSR standards
-    "GuzzleHttp",
-    "Monolog",
-    "Carbon",
-    "League",
-    "Twig",
-    "Laminas",         // Formerly Zend
-    "Predis",
-    "PhpAmqpLib",
-    "Google",
-    "AWS",
-    "Firebase"
+function isPHPBuiltinOrExternal(namespace) {
+  const normalizedNamespace = namespace.replace(/\//g, "\\");
+  const topLevel = normalizedNamespace.split("\\")[0].toLowerCase();
+
+  // PHP built-in namespaces
+  const phpBuiltins = [
+    "php",
+    "spl",
+    "dom",
+    "pdo",
+    "mysqli",
+    "curl",
+    "json",
+    "xml",
+    "soap",
+    "ftp",
+    "http",
+    "arrayaccess",
+    "countable",
+    "iterator",
+    "serializable",
+    "throwable",
+    "exception",
+    "error",
+    "closure",
+    "generator",
+    "reflectionclass",
+    "datetime",
+    "dateinterval",
+    "datetimezone"
   ];
 
-  return externalPrefixes.some(prefix =>
-    namespace.startsWith(prefix + "\\") || namespace === prefix
-  );
+  // Common external packages (Composer packages)
+  const commonExternal = [
+    "illuminate",     // Laravel
+    "symfony",        // Symfony
+    "doctrine",       // Doctrine ORM
+    "monolog",        // Logging
+    "guzzle",         // HTTP Client
+    "guzzlehttp",
+    "league",         // PHP League packages
+    "psr",            // PHP-FIG standards
+    "phpunit",        // Testing
+    "mockery",        // Mocking
+    "carbon",         // Date/Time
+    "ramsey",         // UUIDs
+    "nesbot",         // Carbon
+    "vlucas",         // dotenv
+    "fideloper",
+    "facade",
+    "laravel",
+    "orchestra",
+    "predis",
+    "aws",
+    "stripe",
+    "twilio",
+    "sentry",
+    "bugsnag"
+  ];
+
+  return phpBuiltins.includes(topLevel) ||
+         commonExternal.includes(topLevel) ||
+         normalizedNamespace.startsWith("App\\") === false && !normalizedNamespace.includes("\\");
+}
+
+// -------------------------------------------------------------
+// Resolve require/include path to file
+// -------------------------------------------------------------
+function resolveRequirePath(requirePath, currentFilePath, repoPath, phpFiles) {
+  // Handle __DIR__ and dirname(__FILE__)
+  const currentDir = path.dirname(currentFilePath);
+
+  // Remove common path construction patterns
+  let cleanPath = requirePath
+    .replace(/__DIR__\s*\.\s*['"]?\/?/gi, "")
+    .replace(/dirname\s*\(\s*__FILE__\s*\)\s*\.\s*['"]?\/?/gi, "")
+    .replace(/^\.\//g, "")
+    .replace(/^\//, "");
+
+  // Try to resolve the path
+  const possiblePaths = [
+    path.resolve(currentDir, cleanPath),
+    path.resolve(repoPath, cleanPath),
+    path.resolve(currentDir, "..", cleanPath),
+    path.resolve(repoPath, "app", cleanPath),
+    path.resolve(repoPath, "src", cleanPath)
+  ];
+
+  for (const possiblePath of possiblePaths) {
+    // Check with and without .php extension
+    const pathsToCheck = [
+      possiblePath,
+      possiblePath + ".php"
+    ];
+
+    for (const checkPath of pathsToCheck) {
+      if (fs.existsSync(checkPath)) {
+        return path.relative(repoPath, checkPath);
+      }
+    }
+  }
+
+  return null;
 }
 
 // -------------------------------------------------------------
@@ -198,7 +448,7 @@ function analyzePHPRepo(repoPath, opts = {}) {
   const totalFiles = phpFiles.length;
 
   console.log(`\n📂 Building class and method index...`);
-  const { classIndex, fqcnIndex, methodIndex } = buildClassIndex(phpFiles, repoPath);
+  const { classIndex, fqcnIndex, methodIndex, functionIndex } = buildClassIndex(phpFiles, repoPath);
   console.log(`✅ Found ${Object.keys(classIndex).length} types and ${Object.keys(methodIndex).length} methods across ${totalFiles} files\n`);
 
   const results = [];
@@ -206,9 +456,6 @@ function analyzePHPRepo(repoPath, opts = {}) {
   let spinnerIndex = 0;
 
   console.log(`📊 PHP files to process: ${totalFiles}\n`);
-
-  const parser = new Parser();
-  parser.setLanguage(PHP.php);
 
   for (let i = 0; i < phpFiles.length; i++) {
     const file = phpFiles[i];
@@ -222,80 +469,54 @@ function analyzePHPRepo(repoPath, opts = {}) {
       spinnerIndex++;
 
       const source = fs.readFileSync(file, "utf8");
+      const parser = new Parser();
+      parser.setLanguage(PHP);
       const tree = parser.parse(source);
 
       const importFiles = [];
       const externalImports = [];
 
-      // Extract use directives
-      traverse(tree.rootNode, (node) => {
-        if (node.type === "namespace_use_declaration") {
-          traverse(node, (n) => {
-            if (n.type === "namespace_use_clause") {
-              // Find the qualified_name or name child (not a named field)
-              let nameNode = null;
-              for (let k = 0; k < n.childCount; k++) {
-                const child = n.child(k);
-                if (child.type === "qualified_name" || child.type === "name") {
-                  nameNode = child;
-                  break;
-                }
-              }
-              if (nameNode) {
-                const useNamespace = source.slice(nameNode.startIndex, nameNode.endIndex);
+      // Extract variable types for this file
+      const varTypes = extractVariableTypes(tree, source);
 
-                if (isPHPStdLibOrFramework(useNamespace)) {
-                  externalImports.push(useNamespace);
-                } else {
-                  const resolved = resolveUseDirective(useNamespace, fqcnIndex, classIndex);
-                  if (resolved.type === "local") {
-                    const currentFile = path.relative(repoPath, file);
-                    resolved.files.forEach(f => {
-                      if (f !== currentFile) {
-                        importFiles.push(f);
-                      }
-                    });
-                  } else {
-                    externalImports.push(useNamespace);
-                  }
-                }
-              }
+      // Extract imports (use statements and require/include)
+      const imports = extractImports(file);
+
+      // Process use statements
+      imports.useStatements.forEach(useStmt => {
+        const resolved = resolveUseStatement(useStmt.source, fqcnIndex, classIndex);
+        if (resolved.type === "local") {
+          const currentFile = path.relative(repoPath, file);
+          resolved.files.forEach(f => {
+            if (f !== currentFile) {
+              importFiles.push(f);
             }
           });
-        }
-
-        // Handle require/include
-        if (node.type === "include_expression" ||
-            node.type === "include_once_expression" ||
-            node.type === "require_expression" ||
-            node.type === "require_once_expression") {
-          for (let j = 0; j < node.childCount; j++) {
-            const child = node.child(j);
-            if (child.type === "string" || child.type === "encapsed_string") {
-              let pathValue = source.slice(child.startIndex, child.endIndex);
-              pathValue = pathValue.replace(/^['"]|['"]$/g, "");
-
-              // Try to resolve relative path
-              if (pathValue.startsWith("./") || pathValue.startsWith("../")) {
-                const resolvedPath = path.resolve(path.dirname(file), pathValue);
-                if (fs.existsSync(resolvedPath)) {
-                  importFiles.push(path.relative(repoPath, resolvedPath));
-                } else {
-                  importFiles.push(pathValue);
-                }
-              } else {
-                importFiles.push(pathValue);
-              }
-              break;
-            }
+        } else {
+          // Check if it's truly external or just unresolved local
+          if (isPHPBuiltinOrExternal(useStmt.source)) {
+            externalImports.push(useStmt.source);
+          } else {
+            // Might be a local namespace that wasn't indexed
+            externalImports.push(useStmt.source);
           }
         }
       });
 
-      // Extract functions and classes
+      // Process require/include statements
+      imports.requires.forEach(req => {
+        const resolvedPath = resolveRequirePath(req.source, file, repoPath, phpFiles);
+        if (resolvedPath) {
+          importFiles.push(resolvedPath);
+        }
+      });
+
+      // Extract functions and classes with enhanced call resolution
       const functions = extractFunctionsAndCalls(file, repoPath, {
         classIndex,
-        methodIndex
+        fqcnIndex,
+        methodIndex,
+        varTypes
       }, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 

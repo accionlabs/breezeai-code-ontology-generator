@@ -19,7 +19,8 @@ const { analyzeCSharpRepo } = require("./csharp/file-tree-mapper-csharp");
 const { analyzeGolangRepo } = require("./golang/file-tree-mapper-golang");
 const { analyzeSalesforceRepo } = require("./salesforce/file-tree-mapper-salesforce");
 const { analyzePHPRepo } = require("./php/file-tree-mapper-php");
-const { analyzeVBNetRepo } = require("./vbnet/file-tree-mapper-vbnet");
+// VB.NET support temporarily disabled - files need to be created
+// const { analyzeVBNetRepo } = require("./vbnet/file-tree-mapper-vbnet");
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
 
 const isWindows = process.platform === "win32";
@@ -76,12 +77,13 @@ const LANGUAGE_CONFIG = {
     extensions: ["**/*.php"],
     name: "PHP",
     analyzer: analyzePHPRepo
-  },
-  vbnet: {
-    extensions: ["**/*.vb"],
-    name: "VB.NET",
-    analyzer: analyzeVBNetRepo
   }
+  // VB.NET support temporarily disabled - files need to be created
+  // vbnet: {
+  //   extensions: ["**/*.vb"],
+  //   name: "VB.NET",
+  //   analyzer: analyzeVBNetRepo
+  // }
 };
 
 const IGNORE_PATTERNS = [

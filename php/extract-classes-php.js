@@ -1,34 +1,37 @@
 const Parser = require("tree-sitter");
-const PHP = require("tree-sitter-php");
+const PHP = require("tree-sitter-php").php;
 const fs = require("fs");
-const path = require("path");
 
 function extractClasses(filePath, repoPath = null) {
-  const source = fs.readFileSync(filePath, "utf8");
+  try {
+    const source = fs.readFileSync(filePath, "utf8");
 
-  const parser = new Parser();
-  // Use php_only for pure PHP parsing (no HTML mixed content)
-  parser.setLanguage(PHP.php);
+    const parser = new Parser();
+    parser.setLanguage(PHP);
 
-  const tree = parser.parse(source);
+    const tree = parser.parse(source);
 
-  const classes = [];
+    const classes = [];
 
-  traverse(tree.rootNode, (node) => {
-    if (
-      node.type === "class_declaration" ||
-      node.type === "interface_declaration" ||
-      node.type === "trait_declaration" ||
-      node.type === "enum_declaration"
-    ) {
-      const classInfo = extractClassInfo(node, filePath, repoPath, source);
-      if (classInfo?.name) {
-        classes.push(classInfo);
+    traverse(tree.rootNode, (node) => {
+      if (
+        node.type === "class_declaration" ||
+        node.type === "interface_declaration" ||
+        node.type === "trait_declaration" ||
+        node.type === "enum_declaration"
+      ) {
+        const classInfo = extractClassInfo(node, filePath, repoPath, source);
+        if (classInfo?.name) {
+          classes.push(classInfo);
+        }
       }
-    }
-  });
+    });
 
-  return classes;
+    return classes;
+  } catch (error) {
+    console.error(`Error extracting classes from ${filePath}:`, error);
+    return [];
+  }
 }
 
 function traverse(node, cb) {
@@ -43,7 +46,7 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
   const endLine = node.endPosition.row + 1;
 
   const name = getClassName(node, source);
-  const { superClass, interfaces } = getInheritanceInfo(node, source);
+  const { superClass, interfaces, traits } = getInheritanceInfo(node, source);
   const typeKind = getTypeKind(node);
 
   const {
@@ -53,12 +56,11 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
 
   const { visibility, isAbstract, isFinal } = getClassModifiers(node, source);
 
-  return {
+  const result = {
     name,
     type: typeKind,
     visibility,
     isAbstract,
-    isFinal,
     extends: superClass,
     implements: interfaces,
     constructorParams,
@@ -66,6 +68,13 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
     startLine,
     endLine
   };
+
+  // Add traits if present (PHP-specific)
+  if (traits.length > 0) {
+    result.traits = traits;
+  }
+
+  return result;
 }
 
 function getTypeKind(node) {
@@ -85,65 +94,93 @@ function getTypeKind(node) {
 
 function getClassName(node, source) {
   const nameNode = node.childForFieldName("name");
-  return nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null;
+  if (nameNode) {
+    return source.slice(nameNode.startIndex, nameNode.endIndex);
+  }
+
+  // Try to find name by looking for identifier child
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child.type === "name") {
+      return source.slice(child.startIndex, child.endIndex);
+    }
+  }
+
+  return null;
 }
 
 function getInheritanceInfo(node, source) {
   let superClass = null;
   const interfaces = [];
+  const traits = [];
 
+  // Look for base_clause (extends)
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i);
 
-    // Handle extends clause (base_clause in PHP grammar)
+    // Handle extends clause
     if (child.type === "base_clause") {
-      // First qualified_name is the parent class
       for (let j = 0; j < child.childCount; j++) {
-        const baseChild = child.child(j);
-        if (baseChild.type === "name" || baseChild.type === "qualified_name") {
-          superClass = source.slice(baseChild.startIndex, baseChild.endIndex);
-          break;
+        const extChild = child.child(j);
+        if (extChild.type === "name" || extChild.type === "qualified_name") {
+          superClass = source.slice(extChild.startIndex, extChild.endIndex);
         }
       }
     }
 
-    // Handle implements clause (class_interface_clause in PHP grammar)
+    // Handle class_interface_clause (implements)
     if (child.type === "class_interface_clause") {
-      traverse(child, (n) => {
-        if (n.type === "name" || n.type === "qualified_name") {
-          const interfaceName = source.slice(n.startIndex, n.endIndex);
-          if (!interfaces.includes(interfaceName)) {
-            interfaces.push(interfaceName);
+      for (let j = 0; j < child.childCount; j++) {
+        const implChild = child.child(j);
+        if (implChild.type === "name" || implChild.type === "qualified_name") {
+          interfaces.push(source.slice(implChild.startIndex, implChild.endIndex));
+        }
+      }
+    }
+
+    // Handle declaration_list (body) to find use traits
+    if (child.type === "declaration_list") {
+      for (let j = 0; j < child.childCount; j++) {
+        const bodyChild = child.child(j);
+        if (bodyChild.type === "use_declaration") {
+          // Extract trait names
+          for (let k = 0; k < bodyChild.childCount; k++) {
+            const useChild = bodyChild.child(k);
+            if (useChild.type === "name" || useChild.type === "qualified_name") {
+              traits.push(source.slice(useChild.startIndex, useChild.endIndex));
+            }
           }
         }
-      });
+      }
     }
   }
 
-  return { superClass, interfaces };
+  return { superClass, interfaces, traits };
 }
 
 function getClassModifiers(node, source) {
-  let visibility = "public"; // PHP default
+  let visibility = "public"; // PHP classes default to public
   let isAbstract = false;
   let isFinal = false;
 
+  // Look through all children for modifiers
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i);
     const childText = source.slice(child.startIndex, child.endIndex).toLowerCase();
 
-    if (child.type === "visibility_modifier" || child.type === "abstract_modifier" ||
-        child.type === "final_modifier" || child.type === "modifier") {
+    if (child.type === "abstract_modifier" || childText === "abstract") {
+      isAbstract = true;
+    }
+    if (child.type === "final_modifier" || childText === "final") {
+      isFinal = true;
+    }
+    if (child.type === "visibility_modifier") {
       if (childText === "public") {
         visibility = "public";
       } else if (childText === "private") {
         visibility = "private";
       } else if (childText === "protected") {
         visibility = "protected";
-      } else if (childText === "abstract") {
-        isAbstract = true;
-      } else if (childText === "final") {
-        isFinal = true;
       }
     }
   }
@@ -152,31 +189,54 @@ function getClassModifiers(node, source) {
 }
 
 function extractClassMembers(classNode, source, typeKind) {
-  const body = classNode.childForFieldName("body");
+  const methods = [];
+  let constructorParams = [];
+
+  // Find declaration_list (class body)
+  let body = classNode.childForFieldName("body");
+  if (!body) {
+    for (let i = 0; i < classNode.childCount; i++) {
+      const child = classNode.child(i);
+      if (child.type === "declaration_list") {
+        body = child;
+        break;
+      }
+    }
+  }
+
   if (!body) {
     return { constructorParams: [], methods: [] };
   }
-
-  const methods = [];
-  let constructorParams = [];
 
   for (let i = 0; i < body.childCount; i++) {
     const member = body.child(i);
     if (!member.isNamed) continue;
 
-    // Method declaration
+    // Methods
     if (member.type === "method_declaration") {
       const nameNode = member.childForFieldName("name");
-      if (nameNode) {
+      if (!nameNode) {
+        // Try to find name by traversing
+        for (let j = 0; j < member.childCount; j++) {
+          const child = member.child(j);
+          if (child.type === "name") {
+            const methodName = source.slice(child.startIndex, child.endIndex);
+
+            // Handle constructor
+            if (methodName === "__construct") {
+              constructorParams = extractConstructorParams(member, source);
+            }
+
+            methods.push(methodName);
+            break;
+          }
+        }
+      } else {
         const methodName = source.slice(nameNode.startIndex, nameNode.endIndex);
 
-        // Check if it's the constructor
+        // Handle constructor
         if (methodName === "__construct") {
-          const paramsNode = member.childForFieldName("parameters");
-          if (paramsNode) {
-            constructorParams = extractParameterNames(paramsNode, source);
-          }
-          continue;
+          constructorParams = extractConstructorParams(member, source);
         }
 
         methods.push(methodName);
@@ -187,32 +247,53 @@ function extractClassMembers(classNode, source, typeKind) {
   return { constructorParams, methods };
 }
 
-function extractParameterNames(paramsNode, source) {
+function extractConstructorParams(methodNode, source) {
   const params = [];
+
+  // Look for formal_parameters
+  let paramsNode = methodNode.childForFieldName("parameters");
+
+  if (!paramsNode) {
+    for (let i = 0; i < methodNode.childCount; i++) {
+      const child = methodNode.child(i);
+      if (child.type === "formal_parameters") {
+        paramsNode = child;
+        break;
+      }
+    }
+  }
+
+  if (!paramsNode) return [];
 
   for (let i = 0; i < paramsNode.childCount; i++) {
     const child = paramsNode.child(i);
 
     if (!child.isNamed) continue;
 
-    if (child.type === "simple_parameter" || child.type === "property_promotion_parameter") {
+    if (
+      child.type === "simple_parameter" ||
+      child.type === "property_promotion_parameter" ||
+      child.type === "variadic_parameter"
+    ) {
       const nameNode = child.childForFieldName("name");
       if (nameNode) {
         let paramName = source.slice(nameNode.startIndex, nameNode.endIndex);
-        // Remove $ prefix if present
+        // Remove $ prefix
         if (paramName.startsWith("$")) {
           paramName = paramName.substring(1);
         }
         params.push(paramName);
-      }
-    } else if (child.type === "variadic_parameter") {
-      const nameNode = child.childForFieldName("name");
-      if (nameNode) {
-        let paramName = source.slice(nameNode.startIndex, nameNode.endIndex);
-        if (paramName.startsWith("$")) {
-          paramName = paramName.substring(1);
-        }
-        params.push("..." + paramName);
+      } else {
+        // Try to find variable_name
+        traverse(child, (n) => {
+          if (n.type === "variable_name" && n.parent === child) {
+            let paramName = source.slice(n.startIndex, n.endIndex);
+            if (paramName.startsWith("$")) {
+              paramName = paramName.substring(1);
+            }
+            params.push(paramName);
+          }
+        });
       }
     }
   }
