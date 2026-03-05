@@ -469,7 +469,7 @@ function resolveCallPath(call, index, currentFilePath) {
       // Look up the type in classIndex
       if (classIndex[objectType] && classIndex[objectType].length > 0) {
         // Find the file that has this method
-        if (methodIndex[call.name]) {
+        if (Object.hasOwn(methodIndex, call.name)) {
           const methodEntry = methodIndex[call.name].find(m => m.className === objectType);
           if (methodEntry) {
             return methodEntry.filePath;
@@ -482,7 +482,7 @@ function resolveCallPath(call, index, currentFilePath) {
 
     // Try to resolve objectName as a class name (static method call)
     if (classIndex[call.objectName] && classIndex[call.objectName].length > 0) {
-      if (methodIndex[call.name]) {
+      if (Object.hasOwn(methodIndex, call.name)) {
         const methodEntry = methodIndex[call.name].find(m => m.className === call.objectName);
         if (methodEntry) {
           return methodEntry.filePath;
@@ -493,7 +493,7 @@ function resolveCallPath(call, index, currentFilePath) {
   }
 
   // Try to resolve by method/function name alone
-  if (call.name && methodIndex[call.name]) {
+  if (call.name && Object.hasOwn(methodIndex, call.name)) {
     const methodEntries = methodIndex[call.name];
 
     if (methodEntries.length === 1) {
