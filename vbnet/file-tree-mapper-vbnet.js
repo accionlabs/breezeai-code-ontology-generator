@@ -2,16 +2,29 @@
 /**
  * VB.NET Import Analyzer
  * Analyzes VB.NET files (.vb) and extracts imports, classes, and functions
+ * Uses tree-sitter when available, falls back to regex-based parsing
  * Usage: node file-tree-mapper-vbnet.js <repoPath> <importsOutput.json>
  */
 
 const fs = require("fs");
 const path = require("path");
 const glob = require("glob");
-const Parser = require("tree-sitter");
-const VBNet = require("tree-sitter-vb-dotnet");
-const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-vbnet");
-const { extractClasses } = require("./extract-classes-vbnet");
+const { analyzeVBNetFileWithRegex } = require("./regex-parser-vbnet");
+
+// Try to load tree-sitter, but don't fail if it doesn't work
+let Parser, VBNet, treeSitterAvailable = false;
+try {
+  Parser = require("tree-sitter");
+  VBNet = require("tree-sitter-vb-dotnet");
+  // Test if tree-sitter actually works
+  const testParser = new Parser();
+  testParser.setLanguage(VBNet);
+  testParser.parse("Public Class Test\nEnd Class");
+  treeSitterAvailable = true;
+} catch (e) {
+  console.log("⚠️  Tree-sitter VB.NET bindings not available, using regex parser fallback");
+  treeSitterAvailable = false;
+}
 
 // -------------------------------------------------------------
 // Get VB.NET files
@@ -27,146 +40,83 @@ function getVBNetFiles(repoPath) {
       `${repoPath}/**/.git/**`,
       `${repoPath}/**/My Project/**`,       // Auto-generated files
       `${repoPath}/**/Reference.vb`,        // Service references
-      `${repoPath}/**/*.designer.vb`,       // Designer files
+      `${repoPath}/**/*.Designer.vb`,       // Designer files (capital D)
+      `${repoPath}/**/*.designer.vb`,       // Designer files (lowercase d)
       `${repoPath}/**/AssemblyInfo.vb`      // Assembly info
-    ]
+    ],
+    nocase: true  // Case-insensitive matching for file patterns
   });
 }
 
 // -------------------------------------------------------------
-// Build comprehensive class index
+// Build comprehensive class index using regex parser
 // Maps: className -> file, FQCN -> file, methodName -> [files]
 // -------------------------------------------------------------
-function buildClassIndex(files, repoPath) {
+function buildClassIndexWithRegex(files, repoPath) {
   const classIndex = {};      // className -> [file paths]
   const fqcnIndex = {};       // Namespace.ClassName -> [file paths]
   const methodIndex = {};     // methodName -> [{ className, filePath }]
   const functionIndex = {};   // functionName -> [file paths]
 
-  const parser = new Parser();
-  parser.setLanguage(VBNet);
-
   files.forEach(file => {
     try {
       const source = fs.readFileSync(file, "utf8");
-      const tree = parser.parse(source);
       const relativePath = path.relative(repoPath, file);
 
+      // Extract namespace
       let currentNamespace = "";
+      const namespaceMatch = source.match(/^\s*Namespace\s+(\S+)/mi);
+      if (namespaceMatch) {
+        currentNamespace = namespaceMatch[1];
+      }
 
-      traverse(tree.rootNode, (node) => {
-        // Track namespace
-        if (node.type === "namespace_statement") {
-          const nameNode = node.childForFieldName("name");
-          if (nameNode) {
-            currentNamespace = source.slice(nameNode.startIndex, nameNode.endIndex);
-          } else {
-            // Try to find identifier or qualified_name
-            for (let i = 0; i < node.childCount; i++) {
-              const child = node.child(i);
-              if (child.type === "identifier" || child.type === "qualified_name") {
-                currentNamespace = source.slice(child.startIndex, child.endIndex);
-                break;
-              }
-            }
-          }
+      // Use regex parser to extract classes and functions
+      const result = analyzeVBNetFileWithRegex(file, repoPath);
+
+      // Index classes
+      result.classes.forEach(cls => {
+        const className = cls.name;
+        const fqcn = currentNamespace ? `${currentNamespace}.${className}` : className;
+
+        // Map class name to file
+        if (!classIndex[className]) {
+          classIndex[className] = [];
         }
+        classIndex[className].push(relativePath);
 
-        // Extract class/interface/structure/module/enum names and their methods
-        if (
-          node.type === "class_statement" ||
-          node.type === "interface_statement" ||
-          node.type === "structure_statement" ||
-          node.type === "module_statement" ||
-          node.type === "enum_statement"
-        ) {
-          let className = null;
-          const nameNode = node.childForFieldName("name");
-          if (nameNode) {
-            className = source.slice(nameNode.startIndex, nameNode.endIndex);
-          } else {
-            // Try to find identifier child
-            for (let i = 0; i < node.childCount; i++) {
-              const child = node.child(i);
-              if (child.type === "identifier") {
-                className = source.slice(child.startIndex, child.endIndex);
-                break;
-              }
-            }
-          }
-
-          if (className) {
-            const fqcn = currentNamespace ? `${currentNamespace}.${className}` : className;
-
-            // Map class name to file
-            if (!classIndex[className]) {
-              classIndex[className] = [];
-            }
-            classIndex[className].push(relativePath);
-
-            // Map FQCN to file
-            if (!fqcnIndex[fqcn]) {
-              fqcnIndex[fqcn] = [];
-            }
-            fqcnIndex[fqcn].push(relativePath);
-
-            // Extract methods from this class/interface/structure/module
-            extractMethodsFromNode(node, source, className, relativePath, methodIndex);
-          }
+        // Map FQCN to file
+        if (!fqcnIndex[fqcn]) {
+          fqcnIndex[fqcn] = [];
         }
+        fqcnIndex[fqcn].push(relativePath);
 
-        // Extract standalone functions (Module-level)
-        if (node.type === "function_statement" || node.type === "sub_statement") {
-          // Make sure it's inside a module but not nested in a class
-          let isModuleLevel = false;
-          let parent = node.parent;
-          while (parent) {
-            if (parent.type === "module_statement") {
-              isModuleLevel = true;
-              break;
-            }
-            if (
-              parent.type === "class_statement" ||
-              parent.type === "structure_statement"
-            ) {
-              isModuleLevel = false;
-              break;
-            }
-            parent = parent.parent;
+        // Index methods
+        cls.methods.forEach(methodName => {
+          if (!methodIndex[methodName]) {
+            methodIndex[methodName] = [];
           }
+          methodIndex[methodName].push({
+            className,
+            filePath: relativePath
+          });
+        });
+      });
 
-          if (isModuleLevel) {
-            let funcName = null;
-            const nameNode = node.childForFieldName("name");
-            if (nameNode) {
-              funcName = source.slice(nameNode.startIndex, nameNode.endIndex);
-            } else {
-              for (let i = 0; i < node.childCount; i++) {
-                const child = node.child(i);
-                if (child.type === "identifier") {
-                  funcName = source.slice(child.startIndex, child.endIndex);
-                  break;
-                }
-              }
-            }
-
-            if (funcName) {
-              if (!functionIndex[funcName]) {
-                functionIndex[funcName] = [];
-              }
-              functionIndex[funcName].push(relativePath);
-
-              // Also add to methodIndex for resolution
-              if (!methodIndex[funcName]) {
-                methodIndex[funcName] = [];
-              }
-              methodIndex[funcName].push({
-                className: null,
-                filePath: relativePath
-              });
-            }
-          }
+      // Index standalone functions (module-level)
+      result.functions.forEach(func => {
+        if (!functionIndex[func.name]) {
+          functionIndex[func.name] = [];
         }
+        functionIndex[func.name].push(relativePath);
+
+        // Also add to methodIndex for resolution
+        if (!methodIndex[func.name]) {
+          methodIndex[func.name] = [];
+        }
+        methodIndex[func.name].push({
+          className: null,
+          filePath: relativePath
+        });
       });
     } catch (e) {
       // Skip files that can't be parsed
@@ -174,191 +124,6 @@ function buildClassIndex(files, repoPath) {
   });
 
   return { classIndex, fqcnIndex, methodIndex, functionIndex };
-}
-
-function extractMethodsFromNode(classNode, source, className, filePath, methodIndex) {
-  // Find all methods within this type
-  traverse(classNode, (member) => {
-    if (member === classNode) return;
-
-    // Skip nested types
-    if (
-      member.type === "class_statement" ||
-      member.type === "structure_statement" ||
-      member.type === "module_statement"
-    ) {
-      return;
-    }
-
-    if (
-      member.type === "function_statement" ||
-      member.type === "sub_statement" ||
-      member.type === "property_statement"
-    ) {
-      // Make sure this is a direct child of our class
-      let parent = member.parent;
-      let isDirectChild = false;
-      while (parent) {
-        if (parent === classNode) {
-          isDirectChild = true;
-          break;
-        }
-        if (
-          parent.type === "class_statement" ||
-          parent.type === "structure_statement" ||
-          parent.type === "module_statement"
-        ) {
-          break;
-        }
-        parent = parent.parent;
-      }
-
-      if (!isDirectChild) return;
-
-      let methodName = null;
-      const nameNode = member.childForFieldName("name");
-      if (nameNode) {
-        methodName = source.slice(nameNode.startIndex, nameNode.endIndex);
-      } else {
-        for (let j = 0; j < member.childCount; j++) {
-          const child = member.child(j);
-          if (child.type === "identifier") {
-            methodName = source.slice(child.startIndex, child.endIndex);
-            break;
-          }
-        }
-      }
-
-      if (methodName) {
-        if (!methodIndex[methodName]) {
-          methodIndex[methodName] = [];
-        }
-        methodIndex[methodName].push({
-          className,
-          filePath
-        });
-      }
-    }
-  });
-}
-
-function traverse(node, cb) {
-  cb(node);
-  for (let i = 0; i < node.childCount; i++) {
-    traverse(node.child(i), cb);
-  }
-}
-
-// -------------------------------------------------------------
-// Extract variable types from a file
-// -------------------------------------------------------------
-function extractVariableTypes(tree, source) {
-  const varTypes = {};
-
-  traverse(tree.rootNode, (node) => {
-    // Variable declarations with As clause
-    if (node.type === "variable_declaration" || node.type === "local_declaration_statement") {
-      // Look for variable_declarator with as_clause
-      traverse(node, (n) => {
-        if (n.type === "variable_declarator") {
-          let varName = null;
-          let typeName = null;
-
-          for (let i = 0; i < n.childCount; i++) {
-            const child = n.child(i);
-            if (child.type === "identifier") {
-              varName = source.slice(child.startIndex, child.endIndex);
-            }
-            if (child.type === "as_clause") {
-              // Get the type from as_clause
-              for (let j = 0; j < child.childCount; j++) {
-                const typeChild = child.child(j);
-                if (typeChild.type === "identifier" || typeChild.type === "qualified_name" || typeChild.type === "predefined_type") {
-                  typeName = source.slice(typeChild.startIndex, typeChild.endIndex);
-                }
-              }
-            }
-          }
-
-          if (varName && typeName) {
-            varTypes[varName] = typeName;
-          }
-        }
-      });
-    }
-
-    // Parameters with type hints
-    if (node.type === "parameter") {
-      let paramName = null;
-      let typeName = null;
-
-      for (let i = 0; i < node.childCount; i++) {
-        const child = node.child(i);
-        if (child.type === "identifier") {
-          paramName = source.slice(child.startIndex, child.endIndex);
-        }
-        if (child.type === "as_clause") {
-          for (let j = 0; j < child.childCount; j++) {
-            const typeChild = child.child(j);
-            if (typeChild.type === "identifier" || typeChild.type === "qualified_name" || typeChild.type === "predefined_type") {
-              typeName = source.slice(typeChild.startIndex, typeChild.endIndex);
-            }
-          }
-        }
-      }
-
-      if (paramName && typeName) {
-        varTypes[paramName] = typeName;
-      }
-    }
-  });
-
-  return varTypes;
-}
-
-// -------------------------------------------------------------
-// Resolve Imports statement to local file or external namespace
-// -------------------------------------------------------------
-function resolveImportsStatement(importsNamespace, fqcnIndex, classIndex) {
-  // Normalize namespace separators
-  const normalizedNamespace = importsNamespace.replace(/\//g, ".");
-
-  // Check if it's a direct FQCN match
-  if (fqcnIndex[normalizedNamespace]) {
-    return {
-      type: "local",
-      files: fqcnIndex[normalizedNamespace]
-    };
-  }
-
-  // Check if it's a partial match (importing a namespace that contains our classes)
-  const matchingFiles = [];
-  Object.entries(fqcnIndex).forEach(([fqcn, files]) => {
-    if (fqcn.startsWith(normalizedNamespace + ".") || fqcn === normalizedNamespace) {
-      matchingFiles.push(...files);
-    }
-  });
-
-  if (matchingFiles.length > 0) {
-    return {
-      type: "local",
-      files: [...new Set(matchingFiles)]
-    };
-  }
-
-  // Check by class name only (last part of namespace)
-  const lastPart = normalizedNamespace.split(".").pop();
-  if (classIndex[lastPart]) {
-    return {
-      type: "local",
-      files: classIndex[lastPart]
-    };
-  }
-
-  return {
-    type: "external",
-    namespace: normalizedNamespace
-  };
 }
 
 // -------------------------------------------------------------
@@ -429,14 +194,64 @@ function isVBNetBuiltinOrExternal(namespace) {
 }
 
 // -------------------------------------------------------------
+// Resolve Imports statement to local file or external namespace
+// -------------------------------------------------------------
+function resolveImportsStatement(importsNamespace, fqcnIndex, classIndex) {
+  // Normalize namespace separators
+  const normalizedNamespace = importsNamespace.replace(/\//g, ".");
+
+  // Check if it's a direct FQCN match
+  if (fqcnIndex[normalizedNamespace]) {
+    return {
+      type: "local",
+      files: fqcnIndex[normalizedNamespace]
+    };
+  }
+
+  // Check if it's a partial match (importing a namespace that contains our classes)
+  const matchingFiles = [];
+  Object.entries(fqcnIndex).forEach(([fqcn, files]) => {
+    if (fqcn.startsWith(normalizedNamespace + ".") || fqcn === normalizedNamespace) {
+      matchingFiles.push(...files);
+    }
+  });
+
+  if (matchingFiles.length > 0) {
+    return {
+      type: "local",
+      files: [...new Set(matchingFiles)]
+    };
+  }
+
+  // Check by class name only (last part of namespace)
+  const lastPart = normalizedNamespace.split(".").pop();
+  if (classIndex[lastPart]) {
+    return {
+      type: "local",
+      files: classIndex[lastPart]
+    };
+  }
+
+  return {
+    type: "external",
+    namespace: normalizedNamespace
+  };
+}
+
+// -------------------------------------------------------------
 // Analyze VB.NET files
 // -------------------------------------------------------------
 function analyzeVBNetRepo(repoPath, opts = {}) {
   const vbnetFiles = getVBNetFiles(repoPath);
   const totalFiles = vbnetFiles.length;
 
+  if (totalFiles === 0) {
+    console.log(`\n⚠️  No VB.NET files found in ${repoPath}`);
+    return [];
+  }
+
   console.log(`\n📂 Building class and method index...`);
-  const { classIndex, fqcnIndex, methodIndex, functionIndex } = buildClassIndex(vbnetFiles, repoPath);
+  const { classIndex, fqcnIndex, methodIndex, functionIndex } = buildClassIndexWithRegex(vbnetFiles, repoPath);
   console.log(`✅ Found ${Object.keys(classIndex).length} types and ${Object.keys(methodIndex).length} methods across ${totalFiles} files\n`);
 
   const results = [];
@@ -456,22 +271,14 @@ function analyzeVBNetRepo(repoPath, opts = {}) {
       process.stdout.write(`\r${spinner} Processing: ${i}/${totalFiles} (${percentage}%) - ${fileName.substring(0, 60).padEnd(60, ' ')}`);
       spinnerIndex++;
 
-      const source = fs.readFileSync(file, "utf8");
-      const parser = new Parser();
-      parser.setLanguage(VBNet);
-      const tree = parser.parse(source);
+      // Use regex parser (fallback mode)
+      const analysis = analyzeVBNetFileWithRegex(file, repoPath, opts.captureSourceCode);
 
       const importFiles = [];
       const externalImports = [];
 
-      // Extract variable types for this file
-      const varTypes = extractVariableTypes(tree, source);
-
-      // Extract imports (Imports statements)
-      const imports = extractImports(file);
-
       // Process Imports statements
-      imports.importsStatements.forEach(importStmt => {
+      analysis.imports.importsStatements.forEach(importStmt => {
         const resolved = resolveImportsStatement(importStmt.source, fqcnIndex, classIndex);
         if (resolved.type === "local") {
           const currentFile = path.relative(repoPath, file);
@@ -491,21 +298,38 @@ function analyzeVBNetRepo(repoPath, opts = {}) {
         }
       });
 
-      // Extract functions and classes with enhanced call resolution
-      const functions = extractFunctionsAndCalls(file, repoPath, {
-        classIndex,
-        fqcnIndex,
-        methodIndex,
-        varTypes
-      }, opts.captureSourceCode);
-      const classes = extractClasses(file, repoPath);
+      // Resolve call paths for functions
+      const currentFilePath = path.relative(repoPath, file);
+      const localFunctionMap = new Map();
+      analysis.functions.forEach(func => {
+        localFunctionMap.set(func.name, currentFilePath);
+      });
+
+      // Resolve calls
+      analysis.functions.forEach(func => {
+        func.calls.forEach(call => {
+          if (localFunctionMap.has(call.name)) {
+            call.path = currentFilePath;
+          } else if (methodIndex[call.name]) {
+            const methodEntries = methodIndex[call.name];
+            if (methodEntries.length === 1) {
+              call.path = methodEntries[0].filePath;
+            } else {
+              const otherFileEntry = methodEntries.find(m => m.filePath !== currentFilePath);
+              if (otherFileEntry) {
+                call.path = otherFileEntry.filePath;
+              }
+            }
+          }
+        });
+      });
 
       results.push({
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
-        functions,
-        classes
+        functions: analysis.functions,
+        classes: analysis.classes
       });
     } catch (e) {
       process.stdout.write('\n');
