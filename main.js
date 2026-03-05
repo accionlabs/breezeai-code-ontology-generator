@@ -8,6 +8,7 @@
 const { execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const zlib = require("zlib");
 const glob = require("glob");
 
 // Import language analyzers
@@ -403,7 +404,7 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir, ndjsonTarget
     toolVersion: "1.0.0"
   };
 
-  const mergedOutputPath = path.join(outputDir, `${path.basename(repoPath)}-project-analysis.json`);
+  const mergedOutputPath = path.join(outputDir, `${path.basename(repoPath)}-project-analysis.ndjson`);
 
   // Log summary
   console.log(`✅ Merged output created!`);
@@ -638,16 +639,28 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
 
     console.log(`\n📊 Detected ${detectedLanguages.length} language(s): ${detectedLanguages.map(l => l.name).join(", ")}`);
 
-    // Step 2: Process each detected language
-    const results = [];
+    // Step 2: Process each language and append directly to NDJSON file
+    const ndjsonPath = path.join(outputDir, `${path.basename(repoPath)}-project-analysis.ndjson`);
+    // Clear any previous NDJSON file
+    if (fs.existsSync(ndjsonPath)) fs.unlinkSync(ndjsonPath);
+
+    let accumulatedMetaData = null;
+    let languagesProcessed = 0;
+
     for (const language of detectedLanguages) {
       const result = await processLanguage(language, repoPath, verbose);
       if (result) {
-        results.push(result);
+        const { projectMetaData } = mergeLanguageOutputs([result], repoPath, outputDir, ndjsonPath);
+        if (!accumulatedMetaData) {
+          accumulatedMetaData = projectMetaData;
+        } else {
+          accumulatedMetaData = mergeProjectMetaData(accumulatedMetaData, projectMetaData);
+        }
+        languagesProcessed++;
       }
     }
 
-    if (results.length === 0) {
+    if (languagesProcessed === 0) {
       console.error("\n❌ No languages were successfully processed");
       return { success: false, error: "No languages were successfully processed" };
     }
@@ -656,41 +669,50 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
     try {
       const configData = analyzeConfigRepo(repoPath);
       if (configData && configData.length > 0) {
-        results.push({
-          language: "config",
-          name: "Configuration Files",
-          data: configData
-        });
+        const configResult = { language: "config", name: "Configuration Files", data: configData };
+        const { projectMetaData } = mergeLanguageOutputs([configResult], repoPath, outputDir, ndjsonPath);
+        accumulatedMetaData = mergeProjectMetaData(accumulatedMetaData, projectMetaData);
       }
     } catch (err) {
       console.warn(`\n⚠️  Config file processing failed: ${err.message}`);
     }
 
-    // Step 3: Merge all outputs
-    const { outputPath: mergedOutputPath } = mergeLanguageOutputs(results, repoPath, outputDir);
+    // Prepend projectMetaData as the first line of NDJSON
+    const existingNdjson = fs.existsSync(ndjsonPath) ? fs.readFileSync(ndjsonPath, 'utf-8') : '';
+    fs.writeFileSync(ndjsonPath, JSON.stringify({ __type: "projectMetaData", ...accumulatedMetaData }) + '\n' + existingNdjson);
 
-    // Step 4: Generate descriptions if requested
+    // Gzip the NDJSON file
+    const gzipPath = ndjsonPath + '.gz';
+    const ndjsonContent = fs.readFileSync(ndjsonPath);
+    const gzipped = zlib.gzipSync(ndjsonContent);
+    fs.writeFileSync(gzipPath, gzipped);
+
+    // Remove the uncompressed NDJSON file
+    fs.unlinkSync(ndjsonPath);
+    console.log(`\n📦 Compressed NDJSON output: ${gzipPath}`);
+
+    // Step 5: Generate descriptions if requested
     if (opts.generateDescriptions) {
-      generateDescriptions(mergedOutputPath, repoPath, opts, verbose);
+      generateDescriptions(gzipPath, repoPath, opts, verbose);
     }
 
-    // Step 5: Add metadata if requested
+    // Step 6: Add metadata if requested
     if (opts.addMetadata) {
-      addMetadata(mergedOutputPath, repoPath, opts, verbose);
+      addMetadata(gzipPath, repoPath, opts, verbose);
     }
 
     // Summary
     console.log("\n╔════════════════════════════════════════════════════════════╗");
     console.log("║                    Processing Complete!                   ║");
     console.log("╚════════════════════════════════════════════════════════════╝");
-    console.log(`\n✅ Successfully processed ${results.length} language(s)`);
-    console.log(`📄 Merged output: ${mergedOutputPath}`);
+    console.log(`\n✅ Successfully processed ${languagesProcessed} language(s)`);
+    console.log(`📄 Output: ${gzipPath}`);
     console.log("\n🎉 All tasks completed successfully!");
 
     return {
       success: true,
-      languagesDetected: results.length,
-      outputPath: mergedOutputPath
+      languagesDetected: languagesProcessed,
+      outputPath: gzipPath
     };
 
   } catch (err) {

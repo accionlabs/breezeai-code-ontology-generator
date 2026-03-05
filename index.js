@@ -1,6 +1,7 @@
 const { execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const zlib = require("zlib");
 const { autoDetectAndProcess, generateDescriptions, addMetadata } = require("./main");
 
 const allowedLanguages = ["perl", "javascript", "python", "java", "typescript"];
@@ -64,19 +65,37 @@ async function run(opts) {
 
     execSync(command, { stdio: "inherit", shell: isWindows ? "cmd.exe" : undefined });
 
-    console.log("✅ JSON tree generation finished!");
-    console.log("📄 Output:", importsOutput);
+    console.log("✅ Analysis finished!");
+
+    // Convert JSON to NDJSON + gzip
+    const jsonData = JSON.parse(fs.readFileSync(importsOutput, "utf-8"));
+    const ndjsonPath = importsOutput.replace(/\.json$/, ".ndjson");
+    const lines = Array.isArray(jsonData)
+      ? jsonData.map(item => JSON.stringify(item)).join("\n") + "\n"
+      : JSON.stringify(jsonData) + "\n";
+    fs.writeFileSync(ndjsonPath, lines);
+
+    // Gzip the NDJSON file
+    const gzipPath = ndjsonPath + ".gz";
+    const gzipped = zlib.gzipSync(fs.readFileSync(ndjsonPath));
+    fs.writeFileSync(gzipPath, gzipped);
+
+    // Clean up intermediate files
+    fs.unlinkSync(importsOutput);
+    fs.unlinkSync(ndjsonPath);
+
+    console.log(`📦 Output: ${gzipPath}`);
 
     if (opts.generateDescriptions) {
-      generateDescriptions(importsOutput, repoPath, opts, opts.verbose);
+      generateDescriptions(gzipPath, repoPath, opts, opts.verbose);
     }
 
     if (opts.addMetadata) {
-      addMetadata(importsOutput, repoPath, opts, opts.verbose);
+      addMetadata(gzipPath, repoPath, opts, opts.verbose);
     }
 
     console.log("\n🎉 All tasks completed successfully!");
-    console.log("📄 Final output:", importsOutput);
+    console.log("📄 Final output:", gzipPath);
   } catch (err) {
     console.error("❌ Failed:", err.message);
     process.exit(1);
