@@ -19,6 +19,8 @@ const { analyzeJavaRepo } = require("./java/file-tree-main-java");
 const { analyzeCSharpRepo } = require("./csharp/file-tree-mapper-csharp");
 const { analyzeGolangRepo } = require("./golang/file-tree-mapper-golang");
 const { analyzeSalesforceRepo } = require("./salesforce/file-tree-mapper-salesforce");
+const { analyzePHPRepo } = require("./php/file-tree-mapper-php");
+const { analyzeVBNetRepo } = require("./vbnet/file-tree-mapper-vbnet");
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
 
 const isWindows = process.platform === "win32";
@@ -70,6 +72,16 @@ const LANGUAGE_CONFIG = {
     extensions: ["**/*.cls", "**/*.trigger"],
     name: "Salesforce Apex",
     analyzer: analyzeSalesforceRepo
+  },
+  php: {
+    extensions: ["**/*.php"],
+    name: "PHP",
+    analyzer: analyzePHPRepo
+  },
+  vbnet: {
+    extensions: ["**/*.vb"],
+    name: "VB.NET",
+    analyzer: analyzeVBNetRepo
   }
 };
 
@@ -89,9 +101,12 @@ const IGNORE_PATTERNS = [
   "**/obj/**",           // C# intermediate files
   "**/.vs/**",           // Visual Studio cache
   "**/packages/**",      // NuGet packages
-  "**/vendor/**",        // Go vendor directory
+  "**/vendor/**",        // Go vendor / PHP Composer dependencies
   "**/.sfdx/**",         // Salesforce DX cache
-  "**/.localdevserver/**" // Salesforce local dev
+  "**/.localdevserver/**", // Salesforce local dev
+  "**/storage/**",       // Laravel storage
+  "**/bootstrap/cache/**", // Laravel cache
+  "**/My Project/**"     // VB.NET auto-generated
 ];
 
 // ----------------------------
@@ -152,12 +167,12 @@ function detectLanguages(repoPath, verbose = false) {
 // ----------------------------
 // Process a single language
 // ----------------------------
-async function processLanguage(language, repoPath, verbose = false) {
+async function processLanguage(language, repoPath, verbose = false, opts = {}) {
   try {
     console.log(`\n🚀 Processing ${language.name}...`);
 
     // Call the analyzer function directly (no more temp files!)
-    const data = await Promise.resolve(language.analyzer(repoPath));
+    const data = await Promise.resolve(language.analyzer(repoPath, opts));
 
     console.log(`✅ ${language.name} analysis complete!`);
 
@@ -520,7 +535,7 @@ function generateDescriptions(mergedOutputPath, repoPath, opts, verbose = false)
       console.error("❌ Error: --aws-access-key and --aws-secret-key are required for bedrock provider");
       return false;
     }
-  } else if (!opts.apiKey && provider !== "custom") {
+  } else if (!opts.userApiKey && provider !== "custom") {
     console.error("❌ Error: --api-key is required for --generate-descriptions");
     return false;
   }
@@ -537,8 +552,8 @@ function generateDescriptions(mergedOutputPath, repoPath, opts, verbose = false)
     descCommand += ` --aws-region ${opts.awsRegion || "us-west-2"}`;
     descCommand += ` --aws-access-key ${opts.awsAccessKey}`;
     descCommand += ` --aws-secret-key ${opts.awsSecretKey}`;
-  } else if (opts.apiKey) {
-    descCommand += ` --api-key ${opts.apiKey}`;
+  } else if (opts.userApiKey) {
+    descCommand += ` --api-key ${opts.userApiKey}`;
   }
 
   if (opts.model) descCommand += ` --model ${opts.model}`;
@@ -573,7 +588,7 @@ function addMetadata(mergedOutputPath, repoPath, opts, verbose = false) {
       console.error("❌ Error: --aws-access-key and --aws-secret-key are required for bedrock provider");
       return false;
     }
-  } else if (!opts.apiKey && provider !== "custom") {
+  } else if (!opts.userApiKey && provider !== "custom") {
     console.error("❌ Error: --api-key is required for --add-metadata");
     return false;
   }
@@ -590,8 +605,8 @@ function addMetadata(mergedOutputPath, repoPath, opts, verbose = false) {
     metadataCommand += ` --aws-region ${opts.awsRegion || "us-west-2"}`;
     metadataCommand += ` --aws-access-key ${opts.awsAccessKey}`;
     metadataCommand += ` --aws-secret-key ${opts.awsSecretKey}`;
-  } else if (opts.apiKey) {
-    metadataCommand += ` --api-key ${opts.apiKey}`;
+  } else if (opts.userApiKey) {
+    metadataCommand += ` --api-key ${opts.userApiKey}`;
   }
 
   if (opts.model) metadataCommand += ` --model ${opts.model}`;
@@ -633,7 +648,7 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
 
     if (detectedLanguages.length === 0) {
       console.log("\n⚠️  No supported languages detected in the repository.");
-      console.log("Supported file types: .js, .jsx, .ts, .tsx, .py, .java, .cs, .go, .cls, .trigger");
+      console.log("Supported file types: .js, .jsx, .ts, .tsx, .py, .java, .cs, .go, .cls, .trigger, .php, .vb");
       return { success: true, languagesDetected: 0 };
     }
 
@@ -648,7 +663,7 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
     let languagesProcessed = 0;
 
     for (const language of detectedLanguages) {
-      const result = await processLanguage(language, repoPath, verbose);
+      const result = await processLanguage(language, repoPath, verbose, opts);
       if (result) {
         const { projectMetaData } = mergeLanguageOutputs([result], repoPath, outputDir, ndjsonPath);
         if (!accumulatedMetaData) {

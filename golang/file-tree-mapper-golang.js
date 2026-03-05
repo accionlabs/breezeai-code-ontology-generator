@@ -78,7 +78,7 @@ function extractImports(filePath) {
 // -------------------------------------------------------------
 // Analyze Imports
 // -------------------------------------------------------------
-function analyzeImports(repoPath) {
+function analyzeImports(repoPath, opts = {}) {
   const goFiles = getGoFiles(repoPath);
   const results = [];
   const totalFiles = goFiles.length;
@@ -148,7 +148,7 @@ function analyzeImports(repoPath) {
         }
       }
 
-      const functions = extractFunctionsAndCalls(file, repoPath);
+      const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
       results.push({
@@ -173,8 +173,8 @@ function analyzeImports(repoPath) {
 // -------------------------------------------------------------
 // Wrapper
 // -------------------------------------------------------------
-function analyzeGolangRepo(repoPath) {
-  return analyzeImports(repoPath);
+function analyzeGolangRepo(repoPath, opts = {}) {
+  return analyzeImports(repoPath, opts);
 }
 
 module.exports = { analyzeGolangRepo };
@@ -192,10 +192,11 @@ if (require.main === module) {
 
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
+  const captureSourceCode = process.argv.includes("--capture-source-code");
 
   console.log(`Scanning Go repo: ${repoPath}`);
 
-  const analysis = analyzeGolangRepo(repoPath);
+  const analysis = analyzeGolangRepo(repoPath, { captureSourceCode });
   fs.writeFileSync(importsOutput, JSON.stringify(analysis, null, 2));
 
   console.log(`Output written to → ${importsOutput}`);

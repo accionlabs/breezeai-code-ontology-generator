@@ -24,7 +24,7 @@
   ],
   "author": "Accion Labs",
   "license": "ISC",
-  "description": "Analyze codebases and generate JSON ontology with AI-powered descriptions and metadata for JavaScript, TypeScript, Python, Perl, Java, and C# projects",
+  "description": "Analyze codebases and generate JSON ontology with AI-powered descriptions and metadata for JavaScript, TypeScript, Python, Perl, Java, C#, Go, Salesforce Apex, PHP, and VB.NET projects",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1000.0",
     "@aws-sdk/lib-storage": "^3.1000.0",
@@ -39,9 +39,11 @@
     "tree-sitter-java": "^0.23.5",
     "tree-sitter-javascript": "^0.25.0",
     "tree-sitter-perl": "github:tree-sitter-perl/tree-sitter-perl#release",
+    "tree-sitter-php": "^0.24.2",
     "tree-sitter-python": "^0.23.6",
     "tree-sitter-sfapex": "^2.4.1",
     "tree-sitter-typescript": "^0.23.2",
+    "tree-sitter-vb-dotnet": "^0.1.9",
     "typescript": "^5.9.3",
     "web-tree-sitter": "^0.25.10"
   },
@@ -50,6 +52,27 @@
       "tree-sitter": "$tree-sitter"
     },
     "tree-sitter-sfapex": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-c-sharp": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-php": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-go": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-java": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-python": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-typescript": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-vb-dotnet": {
       "tree-sitter": "$tree-sitter"
     }
   },

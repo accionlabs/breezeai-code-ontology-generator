@@ -116,7 +116,7 @@ function getJsFiles(repoPath) {
 // -------------------------------------------------------------
 // Step 4: Analyze imports
 // -------------------------------------------------------------
-function analyzeImports(repoPath, mapper) {
+function analyzeImports(repoPath, mapper, opts = {}) {
   const jsFiles = getJsFiles(repoPath)
 
 
@@ -239,7 +239,7 @@ function analyzeImports(repoPath, mapper) {
       }
 
       // Extract functions for this file
-      const functions = extractFuncitonAndItsCalls(file, repoPath);
+      const functions = extractFuncitonAndItsCalls(file, repoPath, opts.captureSourceCode);
 
       const classes = extractClasses(file, repoPath)
 
@@ -266,11 +266,11 @@ function analyzeImports(repoPath, mapper) {
 // -------------------------------------------------------------
 // Main export function - to be called from main.js
 // -------------------------------------------------------------
-function analyzeJavaScriptRepo(repoPath) {
+function analyzeJavaScriptRepo(repoPath, opts = {}) {
   console.log(`📂 Scanning JavaScript repo: ${repoPath}`);
 
   const mapper = buildPackageMapper(repoPath);
-  const analysis = analyzeImports(repoPath, mapper);
+  const analysis = analyzeImports(repoPath, mapper, opts);
 
   console.log(`\n📊 Summary:`);
   console.log(`   JavaScript files: ${analysis.length}`);
@@ -303,8 +303,9 @@ if (require.main === module) {
 
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
+  const captureSourceCode = process.argv.includes("--capture-source-code");
 
-  const results = analyzeJavaScriptRepo(repoPath);
+  const results = analyzeJavaScriptRepo(repoPath, { captureSourceCode });
 
   // Write results to file
   fs.writeFileSync(importsOutput, JSON.stringify(results, null, 2));

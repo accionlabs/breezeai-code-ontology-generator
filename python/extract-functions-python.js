@@ -2,18 +2,19 @@ const Parser = require("tree-sitter");
 const Python = require("tree-sitter-python");
 const fs = require("fs");
 const path = require("path");
+const { truncateSourceCode } = require("../utils");
 
-function extractFunctionsWithCalls(filePath, repoPath) {
+function extractFunctionsWithCalls(filePath, repoPath, captureSourceCode = false) {
   const source = fs.readFileSync(filePath, "utf8");
   const parser = new Parser();
   parser.setLanguage(Python);
   const tree = parser.parse(source);
-  
+
   const functions = [];
 
   traverse(tree.rootNode, (node) => {
     if (node.type === "function_definition") {
-      const funcInfo = extractFunctionInfo(node, filePath, repoPath, source);
+      const funcInfo = extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode);
       if (funcInfo.name) {
         functions.push(funcInfo);
       }
@@ -23,7 +24,7 @@ function extractFunctionsWithCalls(filePath, repoPath) {
   return functions;
 }
 
-function extractFunctionInfo(node, filePath, repoPath, source) {
+function extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode = false) {
   const startLine = node.startPosition.row + 1;
   const endLine = node.endPosition.row + 1;
 
@@ -51,7 +52,7 @@ function extractFunctionInfo(node, filePath, repoPath, source) {
     parent = parent.parent;
   }
 
-  return {
+  const result = {
     name,
     type: node.type,
     visibility,
@@ -61,6 +62,12 @@ function extractFunctionInfo(node, filePath, repoPath, source) {
     endLine,
     calls
   };
+
+  if (captureSourceCode && source) {
+    result.sourceCode = truncateSourceCode(source.slice(node.startIndex, node.endIndex));
+  }
+
+  return result;
 }
 
 function getFunctionName(node, source) {
@@ -242,9 +249,9 @@ function traverse(node, cb) {
   }
 }
 
-function extractFunctionsAndCalls(filePath, repoPath) {
+function extractFunctionsAndCalls(filePath, repoPath, captureSourceCode = false) {
   try {
-    const functions = extractFunctionsWithCalls(filePath, repoPath);
+    const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
     const imports = extractImports(filePath);
 
     const functionMap = new Map();

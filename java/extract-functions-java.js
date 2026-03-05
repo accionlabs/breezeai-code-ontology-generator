@@ -2,8 +2,9 @@ const Parser = require("tree-sitter");
 const Java = require("tree-sitter-java");
 const fs = require("fs");
 const path = require("path");
+const { truncateSourceCode } = require("../utils");
 
-function extractFunctionsWithCalls(filePath, repoPath = null, classIndex = {}) {
+function extractFunctionsWithCalls(filePath, repoPath = null, classIndex = {}, captureSourceCode = false) {
   const source = fs.readFileSync(filePath, "utf8");
 
   const parser = new Parser();
@@ -18,7 +19,7 @@ function extractFunctionsWithCalls(filePath, repoPath = null, classIndex = {}) {
       node.type === "method_declaration" ||
       node.type === "constructor_declaration"
     ) {
-      const funcInfo = extractFunctionInfo(node, filePath, repoPath, source);
+      const funcInfo = extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode);
       if (funcInfo.name) {
         functions.push(funcInfo);
       }
@@ -28,7 +29,7 @@ function extractFunctionsWithCalls(filePath, repoPath = null, classIndex = {}) {
   return functions;
 }
 
-function extractFunctionInfo(node, filePath, repoPath = null, source) {
+function extractFunctionInfo(node, filePath, repoPath = null, source, captureSourceCode = false) {
   const startLine = node.startPosition.row + 1;
   const endLine = node.endPosition.row + 1;
 
@@ -38,7 +39,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source) {
 
   const { visibility, kind } = getFunctionModifiers(node, source);
 
-  return {
+  const result = {
     name,
     type: node.type === "constructor_declaration" ? "constructor" : "method",
     visibility,
@@ -48,6 +49,12 @@ function extractFunctionInfo(node, filePath, repoPath = null, source) {
     endLine,
     calls
   };
+
+  if (captureSourceCode && source) {
+    result.sourceCode = truncateSourceCode(source.slice(node.startIndex, node.endIndex));
+  }
+
+  return result;
 }
 
 function getFunctionModifiers(node, source) {
@@ -247,9 +254,9 @@ function isJavaStdLib(name) {
   );
 }
 
-function extractFunctionsAndCalls(filePath, repoPath, classIndex) {
+function extractFunctionsAndCalls(filePath, repoPath, classIndex, captureSourceCode = false) {
   try {
-    const functions = extractFunctionsWithCalls(filePath, repoPath, classIndex);
+    const functions = extractFunctionsWithCalls(filePath, repoPath, classIndex, captureSourceCode);
     const imports = extractImports(filePath, classIndex);
 
     // Build function and class map for call resolution

@@ -38,7 +38,7 @@ function buildJavaClassIndex(repoPath) {
 // -------------------------------------------------------------
 // Main export function - to be called from main.js
 // -------------------------------------------------------------
-function analyzeJavaRepo(repoPath) {
+function analyzeJavaRepo(repoPath, opts = {}) {
   return new Promise((resolve, reject) => {
     console.log(`📂 Scanning Java repo: ${repoPath}`);
 
@@ -71,7 +71,8 @@ function analyzeJavaRepo(repoPath) {
           workerData: {
             repoPath,
             files: chunk,
-            classIndex
+            classIndex,
+            captureSourceCode: !!opts.captureSourceCode
           }
         }
       );
@@ -107,8 +108,9 @@ if (require.main === module) {
 
   const repoPath = path.resolve(process.argv[2]);
   const outputPath = path.resolve(process.argv[3]);
+  const captureSourceCode = process.argv.includes("--capture-source-code");
 
-  analyzeJavaRepo(repoPath)
+  analyzeJavaRepo(repoPath, { captureSourceCode })
     .then(results => {
       fs.mkdirSync(path.dirname(outputPath), { recursive: true });
       fs.writeFileSync(outputPath, JSON.stringify(results, null, 2));

@@ -2,8 +2,9 @@ const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
 const fs = require("fs");
 const path = require("path");
+const { truncateSourceCode } = require("../utils");
 
-function extractFunctionsWithCalls(filePath, repoPath = null) {
+function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false) {
   const source = fs.readFileSync(filePath, "utf8");
 
   const parser = new Parser();
@@ -20,7 +21,7 @@ function extractFunctionsWithCalls(filePath, repoPath = null) {
       node.type === "arrow_function" ||
       node.type === "method_definition"
     ) {
-      const funcInfo = extractFunctionInfo(node, filePath, repoPath);
+      const funcInfo = extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode);
       // Filter out functions with null names
       if (funcInfo.name) {
         functions.push(funcInfo);
@@ -31,7 +32,7 @@ function extractFunctionsWithCalls(filePath, repoPath = null) {
   return functions;
 }
 
-function extractFunctionInfo(node, filePath, repoPath = null) {
+function extractFunctionInfo(node, filePath, repoPath = null, source = null, captureSourceCode = false) {
   const startLine = node.startPosition.row + 1;
   const endLine = node.endPosition.row + 1;
 
@@ -43,7 +44,7 @@ function extractFunctionInfo(node, filePath, repoPath = null) {
 
   // const relativePath = repoPath ? path.relative(repoPath, filePath) : filePath;
 
-  return {
+  const result = {
     name,
     type: node.type,
     visibility,
@@ -54,6 +55,12 @@ function extractFunctionInfo(node, filePath, repoPath = null) {
     // path: relativePath,
     calls
   };
+
+  if (captureSourceCode && source) {
+    result.sourceCode = truncateSourceCode(source.slice(node.startIndex, node.endIndex));
+  }
+
+  return result;
 }
 
 function getFunctionModifiers(node) {
@@ -365,9 +372,9 @@ function resolveImportPath(importSource, currentFilePath, repoPath) {
 }
 
 
-function extractFuncitonAndItsCalls(filePath, repoPath) {
+function extractFuncitonAndItsCalls(filePath, repoPath, captureSourceCode = false) {
  try {
-      const functions = extractFunctionsWithCalls(filePath, repoPath);
+      const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
       const imports = extractImports(filePath);
 
 
