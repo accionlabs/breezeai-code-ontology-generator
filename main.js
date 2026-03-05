@@ -18,6 +18,8 @@ const { analyzeJavaRepo } = require("./java/file-tree-main-java");
 const { analyzeCSharpRepo } = require("./csharp/file-tree-mapper-csharp");
 const { analyzeGolangRepo } = require("./golang/file-tree-mapper-golang");
 const { analyzeSalesforceRepo } = require("./salesforce/file-tree-mapper-salesforce");
+const { analyzePHPRepo } = require("./php/file-tree-mapper-php");
+const { analyzeVBNetRepo } = require("./vbnet/file-tree-mapper-vbnet");
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
 
 const isWindows = process.platform === "win32";
@@ -69,6 +71,16 @@ const LANGUAGE_CONFIG = {
     extensions: ["**/*.cls", "**/*.trigger"],
     name: "Salesforce Apex",
     analyzer: analyzeSalesforceRepo
+  },
+  php: {
+    extensions: ["**/*.php"],
+    name: "PHP",
+    analyzer: analyzePHPRepo
+  },
+  vbnet: {
+    extensions: ["**/*.vb"],
+    name: "VB.NET",
+    analyzer: analyzeVBNetRepo
   }
 };
 
@@ -88,9 +100,12 @@ const IGNORE_PATTERNS = [
   "**/obj/**",           // C# intermediate files
   "**/.vs/**",           // Visual Studio cache
   "**/packages/**",      // NuGet packages
-  "**/vendor/**",        // Go vendor directory
+  "**/vendor/**",        // Go vendor / PHP Composer dependencies
   "**/.sfdx/**",         // Salesforce DX cache
-  "**/.localdevserver/**" // Salesforce local dev
+  "**/.localdevserver/**", // Salesforce local dev
+  "**/storage/**",       // Laravel storage
+  "**/bootstrap/cache/**", // Laravel cache
+  "**/My Project/**"     // VB.NET auto-generated
 ];
 
 // ----------------------------
@@ -545,7 +560,7 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
 
     if (detectedLanguages.length === 0) {
       console.log("\n⚠️  No supported languages detected in the repository.");
-      console.log("Supported file types: .js, .jsx, .ts, .tsx, .py, .java, .cs, .go, .cls, .trigger");
+      console.log("Supported file types: .js, .jsx, .ts, .tsx, .py, .java, .cs, .go, .cls, .trigger, .php, .vb");
       return { success: true, languagesDetected: 0 };
     }
 
