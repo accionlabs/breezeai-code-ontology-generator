@@ -46,7 +46,7 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
   const endLine = node.endPosition.row + 1;
 
   const name = getClassName(node, source);
-  const { superClass, interfaces, traits } = getInheritanceInfo(node, source);
+  const { superClass, interfaces } = getInheritanceInfo(node, source);
   const typeKind = getTypeKind(node);
 
   const {
@@ -56,7 +56,7 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
 
   const { visibility, isAbstract, isFinal } = getClassModifiers(node, source);
 
-  const result = {
+  return {
     name,
     type: typeKind,
     visibility,
@@ -68,13 +68,6 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
     startLine,
     endLine
   };
-
-  // Add traits if present (PHP-specific)
-  if (traits.length > 0) {
-    result.traits = traits;
-  }
-
-  return result;
 }
 
 function getTypeKind(node) {
@@ -112,7 +105,6 @@ function getClassName(node, source) {
 function getInheritanceInfo(node, source) {
   let superClass = null;
   const interfaces = [];
-  const traits = [];
 
   // Look for base_clause (extends)
   for (let i = 0; i < node.childCount; i++) {
@@ -137,25 +129,9 @@ function getInheritanceInfo(node, source) {
         }
       }
     }
-
-    // Handle declaration_list (body) to find use traits
-    if (child.type === "declaration_list") {
-      for (let j = 0; j < child.childCount; j++) {
-        const bodyChild = child.child(j);
-        if (bodyChild.type === "use_declaration") {
-          // Extract trait names
-          for (let k = 0; k < bodyChild.childCount; k++) {
-            const useChild = bodyChild.child(k);
-            if (useChild.type === "name" || useChild.type === "qualified_name") {
-              traits.push(source.slice(useChild.startIndex, useChild.endIndex));
-            }
-          }
-        }
-      }
-    }
   }
 
-  return { superClass, interfaces, traits };
+  return { superClass, interfaces };
 }
 
 function getClassModifiers(node, source) {

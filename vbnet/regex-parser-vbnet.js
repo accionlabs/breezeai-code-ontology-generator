@@ -213,8 +213,6 @@ function extractClassesFromSource(source, filePath, repoPath) {
         type,
         visibility: parseVisibility(modifiers),
         isAbstract: typeLower.includes("mustinherit"),
-        isSealed: typeLower.includes("notinheritable"),
-        isPartial: typeLower.includes("partial"),
         extends: null,
         implements: [],
         constructorParams: [],

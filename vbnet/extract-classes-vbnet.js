@@ -55,7 +55,7 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
     methods
   } = extractClassMembers(node, source, typeKind);
 
-  const { visibility, isAbstract, isSealed, isPartial } = getClassModifiers(node, source);
+  const { visibility, isAbstract } = getClassModifiers(node, source);
 
   const result = {
     name,
@@ -69,14 +69,6 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
     startLine,
     endLine
   };
-
-  // Add VB.NET specific modifiers
-  if (isSealed) {
-    result.isSealed = true;
-  }
-  if (isPartial) {
-    result.isPartial = true;
-  }
 
   return result;
 }
@@ -149,8 +141,6 @@ function getInheritanceInfo(node, source) {
 function getClassModifiers(node, source) {
   let visibility = "public"; // VB.NET classes default to Friend within assembly, but we'll use public
   let isAbstract = false;
-  let isSealed = false;
-  let isPartial = false;
 
   // Look through all children for modifiers
   for (let i = 0; i < node.childCount; i++) {
@@ -174,15 +164,9 @@ function getClassModifiers(node, source) {
     if (childText === "mustinherit") {
       isAbstract = true;
     }
-    if (childText === "notinheritable") {
-      isSealed = true;
-    }
-    if (childText === "partial") {
-      isPartial = true;
-    }
   }
 
-  return { visibility, isAbstract, isSealed, isPartial };
+  return { visibility, isAbstract };
 }
 
 function extractClassMembers(classNode, source, typeKind) {
