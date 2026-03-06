@@ -8,6 +8,7 @@
 const { execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const zlib = require("zlib");
 const glob = require("glob");
 
 // Import language analyzers
@@ -185,10 +186,20 @@ async function processLanguage(language, repoPath, verbose = false, opts = {}) {
 // ----------------------------
 // Merge all language outputs into single JSON
 // ----------------------------
-function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
+function mergeLanguageOutputs(languageResults, repoPath, outputDir, ndjsonTarget, filterPaths) {
   console.log("\n🔄 Merging all language outputs...");
 
-  const mergedFiles = [];
+  // ndjsonTarget can be a writable stream, a file path string, or falsy (in-memory mode).
+  const isStream = ndjsonTarget && typeof ndjsonTarget.write === 'function';
+  const isFilePath = ndjsonTarget && typeof ndjsonTarget === 'string';
+  const mergedFiles = (isStream || isFilePath) ? null : [];
+  let totalFilesCount = 0;
+
+  function writeNdjsonLine(obj) {
+    if (isStream) ndjsonTarget.write(JSON.stringify(obj) + '\n');
+    else if (isFilePath) fs.appendFileSync(ndjsonTarget, JSON.stringify(obj) + '\n');
+    else mergedFiles.push(obj);
+  }
   const analyzedLanguages = [];
   let totalFunctions = 0;
   let totalClasses = 0;
@@ -259,7 +270,10 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
               metadata
             };
 
-            mergedFiles.push(configFileData);
+            if (!filterPaths || filterPaths.has(file.path)) {
+              writeNdjsonLine(configFileData);
+              totalFilesCount++;
+            }
             configStats.totalConfigFiles++;
 
             // Count by type
@@ -352,7 +366,10 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
               loc
             };
 
-            mergedFiles.push(codeFileData);
+            if (!filterPaths || filterPaths.has(file.path)) {
+              writeNdjsonLine(codeFileData);
+              totalFilesCount++;
+            }
 
             // Count files by language
             if (!languageFileCount[result.language]) {
@@ -388,32 +405,28 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
     configStats.byType[lang] = count;
   });
 
-  // Create the final merged structure
-  const mergedOutput = {
-    projectMetaData: {
-      repositoryPath: repoPath,
-      repositoryName: path.basename(repoPath),
-      analyzedLanguages,
-      totalFiles: mergedFiles.length,
-      totalFunctions,
-      totalClasses,
-      totalLinesOfCode,
-      configs: configStats,
-      generatedAt: new Date().toISOString(),
-      toolVersion: "1.0.0"
-    },
-    files: mergedFiles
+  // Build projectMetaData (always in memory — small scalars)
+  const projectMetaData = {
+    repositoryPath: repoPath,
+    repositoryName: path.basename(repoPath),
+    analyzedLanguages,
+    totalFiles: totalFilesCount,
+    totalFunctions,
+    totalClasses,
+    totalLinesOfCode,
+    configs: configStats,
+    generatedAt: new Date().toISOString(),
+    toolVersion: "1.0.0"
   };
 
-  // Write merged output
-  const mergedOutputPath = path.join(outputDir, `${path.basename(repoPath)}-project-analysis.json`);
-  fs.writeFileSync(mergedOutputPath, JSON.stringify(mergedOutput, null, 2));
+  const mergedOutputPath = path.join(outputDir, `${path.basename(repoPath)}-project-analysis.ndjson`);
 
+  // Log summary
   console.log(`✅ Merged output created!`);
   console.log(`📄 Output: ${mergedOutputPath}`);
   console.log(`   - Languages: ${analyzedLanguages.join(", ")}`);
-  console.log(`   - Total files: ${mergedFiles.length}`);
-  console.log(`   - Code files: ${mergedFiles.length - configStats.totalConfigFiles}`);
+  console.log(`   - Total files: ${totalFilesCount}`);
+  console.log(`   - Code files: ${totalFilesCount - configStats.totalConfigFiles}`);
   console.log(`   - Config files: ${configStats.totalConfigFiles}`);
   console.log(`   - Total functions: ${totalFunctions}`);
   console.log(`   - Total classes: ${totalClasses}`);
@@ -432,7 +445,82 @@ function mergeLanguageOutputs(languageResults, repoPath, outputDir) {
     }
   }
 
+  if (isStream || isFilePath) {
+    // NDJSON mode: don't build the full output in memory, return metadata separately
+    return { outputPath: mergedOutputPath, projectMetaData, ndjsonPath: isFilePath ? ndjsonTarget : null };
+  }
+
+  // Legacy mode: build full output in memory
+  const mergedOutput = {
+    projectMetaData,
+    files: mergedFiles
+  };
+
+  fs.writeFileSync(mergedOutputPath, JSON.stringify(mergedOutput, null, 2));
   return { outputPath: mergedOutputPath, data: mergedOutput };
+}
+
+// ----------------------------
+// Merge two projectMetaData objects (for incremental NDJSON merging)
+// ----------------------------
+function mergeProjectMetaData(base, incoming) {
+  const mergedByType = { ...base.configs.byType };
+  for (const [key, val] of Object.entries(incoming.configs.byType)) {
+    mergedByType[key] = (mergedByType[key] || 0) + val;
+  }
+
+  return {
+    repositoryPath: base.repositoryPath,
+    repositoryName: base.repositoryName,
+    analyzedLanguages: [...base.analyzedLanguages, ...incoming.analyzedLanguages],
+    totalFiles: base.totalFiles + incoming.totalFiles,
+    totalFunctions: base.totalFunctions + incoming.totalFunctions,
+    totalClasses: base.totalClasses + incoming.totalClasses,
+    totalLinesOfCode: base.totalLinesOfCode + incoming.totalLinesOfCode,
+    configs: {
+      totalConfigFiles: base.configs.totalConfigFiles + incoming.configs.totalConfigFiles,
+      byType: mergedByType,
+      packageManagers: [...new Set([...base.configs.packageManagers, ...incoming.configs.packageManagers])],
+      dockerInfo: {
+        hasDockerfile: base.configs.dockerInfo.hasDockerfile || incoming.configs.dockerInfo.hasDockerfile,
+        hasDockerCompose: base.configs.dockerInfo.hasDockerCompose || incoming.configs.dockerInfo.hasDockerCompose,
+        services: [...new Set([...base.configs.dockerInfo.services, ...incoming.configs.dockerInfo.services])],
+        exposedPorts: [...new Set([...base.configs.dockerInfo.exposedPorts, ...incoming.configs.dockerInfo.exposedPorts])],
+      },
+      buildTools: [...new Set([...base.configs.buildTools, ...incoming.configs.buildTools])],
+      dependencies: {
+        total: base.configs.dependencies.total + incoming.configs.dependencies.total,
+        production: base.configs.dependencies.production + incoming.configs.dependencies.production,
+        development: base.configs.dependencies.development + incoming.configs.dependencies.development,
+      },
+    },
+    generatedAt: incoming.generatedAt,
+    toolVersion: incoming.toolVersion,
+  };
+}
+
+// ----------------------------
+// Assemble final JSON output from NDJSON file
+// ----------------------------
+function assembleOutputFromNdjson(ndjsonPath, projectMetaData, outputJsonPath) {
+  console.log("\n🔄 Assembling final output from NDJSON file...");
+
+  const files = [];
+  const content = fs.readFileSync(ndjsonPath, 'utf-8');
+  const lines = content.split('\n');
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed) {
+      files.push(JSON.parse(trimmed));
+    }
+  }
+
+  const output = { projectMetaData, files };
+  fs.writeFileSync(outputJsonPath, JSON.stringify(output, null, 2));
+
+  console.log(`✅ Assembled ${files.length} files into ${outputJsonPath}`);
+  return output;
 }
 
 // ----------------------------
@@ -566,16 +654,28 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
 
     console.log(`\n📊 Detected ${detectedLanguages.length} language(s): ${detectedLanguages.map(l => l.name).join(", ")}`);
 
-    // Step 2: Process each detected language
-    const results = [];
+    // Step 2: Process each language and append directly to NDJSON file
+    const ndjsonPath = path.join(outputDir, `${path.basename(repoPath)}-project-analysis.ndjson`);
+    // Clear any previous NDJSON file
+    if (fs.existsSync(ndjsonPath)) fs.unlinkSync(ndjsonPath);
+
+    let accumulatedMetaData = null;
+    let languagesProcessed = 0;
+
     for (const language of detectedLanguages) {
       const result = await processLanguage(language, repoPath, verbose, opts);
       if (result) {
-        results.push(result);
+        const { projectMetaData } = mergeLanguageOutputs([result], repoPath, outputDir, ndjsonPath);
+        if (!accumulatedMetaData) {
+          accumulatedMetaData = projectMetaData;
+        } else {
+          accumulatedMetaData = mergeProjectMetaData(accumulatedMetaData, projectMetaData);
+        }
+        languagesProcessed++;
       }
     }
 
-    if (results.length === 0) {
+    if (languagesProcessed === 0) {
       console.error("\n❌ No languages were successfully processed");
       return { success: false, error: "No languages were successfully processed" };
     }
@@ -584,41 +684,50 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
     try {
       const configData = analyzeConfigRepo(repoPath);
       if (configData && configData.length > 0) {
-        results.push({
-          language: "config",
-          name: "Configuration Files",
-          data: configData
-        });
+        const configResult = { language: "config", name: "Configuration Files", data: configData };
+        const { projectMetaData } = mergeLanguageOutputs([configResult], repoPath, outputDir, ndjsonPath);
+        accumulatedMetaData = mergeProjectMetaData(accumulatedMetaData, projectMetaData);
       }
     } catch (err) {
       console.warn(`\n⚠️  Config file processing failed: ${err.message}`);
     }
 
-    // Step 3: Merge all outputs
-    const { outputPath: mergedOutputPath } = mergeLanguageOutputs(results, repoPath, outputDir);
+    // Prepend projectMetaData as the first line of NDJSON
+    const existingNdjson = fs.existsSync(ndjsonPath) ? fs.readFileSync(ndjsonPath, 'utf-8') : '';
+    fs.writeFileSync(ndjsonPath, JSON.stringify({ __type: "projectMetaData", ...accumulatedMetaData }) + '\n' + existingNdjson);
 
-    // Step 4: Generate descriptions if requested
+    // Gzip the NDJSON file
+    const gzipPath = ndjsonPath + '.gz';
+    const ndjsonContent = fs.readFileSync(ndjsonPath);
+    const gzipped = zlib.gzipSync(ndjsonContent);
+    fs.writeFileSync(gzipPath, gzipped);
+
+    // Remove the uncompressed NDJSON file
+    fs.unlinkSync(ndjsonPath);
+    console.log(`\n📦 Compressed NDJSON output: ${gzipPath}`);
+
+    // Step 5: Generate descriptions if requested
     if (opts.generateDescriptions) {
-      generateDescriptions(mergedOutputPath, repoPath, opts, verbose);
+      generateDescriptions(gzipPath, repoPath, opts, verbose);
     }
 
-    // Step 5: Add metadata if requested
+    // Step 6: Add metadata if requested
     if (opts.addMetadata) {
-      addMetadata(mergedOutputPath, repoPath, opts, verbose);
+      addMetadata(gzipPath, repoPath, opts, verbose);
     }
 
     // Summary
     console.log("\n╔════════════════════════════════════════════════════════════╗");
     console.log("║                    Processing Complete!                   ║");
     console.log("╚════════════════════════════════════════════════════════════╝");
-    console.log(`\n✅ Successfully processed ${results.length} language(s)`);
-    console.log(`📄 Merged output: ${mergedOutputPath}`);
+    console.log(`\n✅ Successfully processed ${languagesProcessed} language(s)`);
+    console.log(`📄 Output: ${gzipPath}`);
     console.log("\n🎉 All tasks completed successfully!");
 
     return {
       success: true,
-      languagesDetected: results.length,
-      outputPath: mergedOutputPath
+      languagesDetected: languagesProcessed,
+      outputPath: gzipPath
     };
 
   } catch (err) {
@@ -641,6 +750,8 @@ module.exports = {
   detectLanguages,
   processLanguage,
   mergeLanguageOutputs,
+  mergeProjectMetaData,
+  assembleOutputFromNdjson,
   generateDescriptions,
   addMetadata
 };
