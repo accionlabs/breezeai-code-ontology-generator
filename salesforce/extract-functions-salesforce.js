@@ -2,15 +2,13 @@ const Parser = require("tree-sitter");
 const Apex = require("tree-sitter-sfapex");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode } = require("../utils");
+const { truncateSourceCode, parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(Apex.apex);
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false) {
-  const source = fs.readFileSync(filePath, "utf8");
-
-  const parser = new Parser();
-  parser.setLanguage(Apex.apex);
-
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const functions = [];
 
@@ -176,10 +174,7 @@ function traverse(node, cb) {
 }
 
 function extractReferences(filePath) {
-  const source = fs.readFileSync(filePath, "utf8");
-  const parser = new Parser();
-  parser.setLanguage(Apex.apex);
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const references = [];
 

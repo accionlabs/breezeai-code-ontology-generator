@@ -2,14 +2,13 @@ const Parser = require("tree-sitter");
 const Java = require("tree-sitter-java");
 const fs = require("fs");
 const path = require("path");
+const { parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(Java);
 
 function extractClasses(filePath, repoPath = null) {
-  const source = fs.readFileSync(filePath, "utf8");
-
-  const parser = new Parser();
-  parser.setLanguage(Java);
-
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const classes = [];
 

@@ -1,13 +1,14 @@
 const Parser = require("tree-sitter");
 const Python = require("tree-sitter-python");
 const fs = require("fs");
+const { parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(Python);
 
 function extractClasses(filePath, repoPath) {
   try {
-    const source = fs.readFileSync(filePath, "utf8");
-    const parser = new Parser();
-    parser.setLanguage(Python);
-    const tree = parser.parse(source);
+    const { source, tree } = parseSource(filePath, sharedParser);
 
     const classes = [];
 

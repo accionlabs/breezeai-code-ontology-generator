@@ -78,12 +78,18 @@ function analyzeJavaRepo(repoPath, opts = {}) {
       );
 
       worker.on("message", data => {
-        results.push(...data);
+        if (opts.onResult) {
+          data.forEach(item => opts.onResult(item));
+        } else {
+          results.push(...data);
+        }
         done++;
         if (done === totalChunks) {
-          console.log(`\n📊 Summary:`);
-          console.log(`   Java files: ${results.length}`);
-          resolve(results);
+          if (!opts.onResult) {
+            console.log(`\n📊 Summary:`);
+            console.log(`   Java files: ${results.length}`);
+          }
+          resolve(opts.onResult ? [] : results);
         }
       });
 

@@ -12,6 +12,7 @@ const Parser = require("tree-sitter");
 const PHP = require("tree-sitter-php").php;
 const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-php");
 const { extractClasses } = require("./extract-classes-php");
+const { readSource, parseSource } = require("../utils");
 
 // -------------------------------------------------------------
 // Get PHP files
@@ -37,19 +38,19 @@ function getPHPFiles(repoPath) {
 // Build comprehensive class index
 // Maps: className -> file, FQCN -> file, methodName -> [files]
 // -------------------------------------------------------------
+// Reuse a single parser instance
+const phpParser = new Parser();
+phpParser.setLanguage(PHP);
+
 function buildClassIndex(files, repoPath) {
   const classIndex = {};      // className -> [file paths]
   const fqcnIndex = {};       // Namespace\ClassName -> [file paths]
   const methodIndex = {};     // methodName -> [{ className, filePath }]
   const functionIndex = {};   // functionName -> [file paths]
 
-  const parser = new Parser();
-  parser.setLanguage(PHP);
-
   files.forEach(file => {
     try {
-      const source = fs.readFileSync(file, "utf8");
-      const tree = parser.parse(source);
+      const { source, tree } = parseSource(file, phpParser);
       const relativePath = path.relative(repoPath, file);
 
       let currentNamespace = "";
@@ -451,7 +452,7 @@ function analyzePHPRepo(repoPath, opts = {}) {
   const { classIndex, fqcnIndex, methodIndex, functionIndex } = buildClassIndex(phpFiles, repoPath);
   console.log(`✅ Found ${Object.keys(classIndex).length} types and ${Object.keys(methodIndex).length} methods across ${totalFiles} files\n`);
 
-  const results = [];
+  const results = opts.onResult ? null : [];
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let spinnerIndex = 0;
 
@@ -468,10 +469,7 @@ function analyzePHPRepo(repoPath, opts = {}) {
       process.stdout.write(`\r${spinner} Processing: ${i}/${totalFiles} (${percentage}%) - ${fileName.substring(0, 60).padEnd(60, ' ')}`);
       spinnerIndex++;
 
-      const source = fs.readFileSync(file, "utf8");
-      const parser = new Parser();
-      parser.setLanguage(PHP);
-      const tree = parser.parse(source);
+      const { source, tree } = parseSource(file, phpParser);
 
       const importFiles = [];
       const externalImports = [];
@@ -520,13 +518,18 @@ function analyzePHPRepo(repoPath, opts = {}) {
       }, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
-      results.push({
+      const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions,
         classes
-      });
+      };
+      if (opts.onResult) {
+        opts.onResult(fileResult);
+      } else {
+        results.push(fileResult);
+      }
     } catch (e) {
       process.stdout.write('\n');
       console.log(`❌ Error analyzing file: ${file} - ${e.message}`);
@@ -536,7 +539,7 @@ function analyzePHPRepo(repoPath, opts = {}) {
   process.stdout.write('\r' + ' '.repeat(150) + '\r');
   console.log(`✅ Completed processing ${totalFiles} PHP files\n`);
 
-  return results;
+  return results || [];
 }
 
 // -------------------------------------------------------------

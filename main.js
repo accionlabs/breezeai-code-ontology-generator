@@ -10,6 +10,7 @@ const path = require("path");
 const fs = require("fs");
 const zlib = require("zlib");
 const glob = require("glob");
+const { readSource } = require("./utils");
 
 // Import language analyzers
 const { analyzeTypeScriptRepo } = require("./typescript/file-tree-mapper-typescript");
@@ -25,11 +26,15 @@ const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
 
 const isWindows = process.platform === "win32";
 
-// Helper function to count lines of code
+// Helper function to count lines of code (uses source cache to avoid re-reading)
 function countLinesOfCode(filePath) {
   try {
-    const content = fs.readFileSync(filePath, "utf-8");
-    return content.split("\n").length;
+    const content = readSource(filePath);
+    let count = 1;
+    for (let i = 0; i < content.length; i++) {
+      if (content.charCodeAt(i) === 10) count++;
+    }
+    return count;
   } catch (err) {
     return 0;
   }
@@ -654,53 +659,197 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
 
     console.log(`\n📊 Detected ${detectedLanguages.length} language(s): ${detectedLanguages.map(l => l.name).join(", ")}`);
 
-    // Step 2: Process each language and append directly to NDJSON file
+    // Step 2: Process each language in batches, streaming results to NDJSON
     const ndjsonPath = path.join(outputDir, `${path.basename(repoPath)}-project-analysis.ndjson`);
     // Clear any previous NDJSON file
     if (fs.existsSync(ndjsonPath)) fs.unlinkSync(ndjsonPath);
 
-    let accumulatedMetaData = null;
+    // Stats accumulators (avoid holding all file data in memory)
+    const analyzedLanguages = [];
+    let totalFiles = 0;
+    let totalFunctions = 0;
+    let totalClasses = 0;
+    let totalLinesOfCode = 0;
+    const languageFileCount = {};
     let languagesProcessed = 0;
+    let ndjsonFd = fs.openSync(ndjsonPath, 'a');
 
     for (const language of detectedLanguages) {
-      const result = await processLanguage(language, repoPath, verbose, opts);
-      if (result) {
-        const { projectMetaData } = mergeLanguageOutputs([result], repoPath, outputDir, ndjsonPath);
-        if (!accumulatedMetaData) {
-          accumulatedMetaData = projectMetaData;
-        } else {
-          accumulatedMetaData = mergeProjectMetaData(accumulatedMetaData, projectMetaData);
-        }
+      try {
+        console.log(`\n🚀 Processing ${language.name}...`);
+
+        // Streaming callback: each file result is written to NDJSON immediately
+        const onResult = (fileData) => {
+          const filePath = path.join(repoPath, fileData.path);
+          const loc = countLinesOfCode(filePath);
+          totalLinesOfCode += loc;
+
+          // Mutate in place to avoid copying large objects (functions/classes arrays)
+          fileData.type = "code";
+          fileData.language = language.key;
+          fileData.loc = loc;
+
+          fs.writeSync(ndjsonFd, JSON.stringify(fileData) + '\n');
+          totalFiles++;
+          languageFileCount[language.key] = (languageFileCount[language.key] || 0) + 1;
+
+          if (fileData.functions && Array.isArray(fileData.functions)) {
+            totalFunctions += fileData.functions.length;
+          }
+          if (fileData.classes && Array.isArray(fileData.classes)) {
+            totalClasses += fileData.classes.length;
+          }
+        };
+
+        await Promise.resolve(language.analyzer(repoPath, { ...opts, onResult }));
+        analyzedLanguages.push(language.key);
         languagesProcessed++;
+        console.log(`✅ ${language.name} analysis complete!`);
+      } catch (err) {
+        console.error(`\n❌ ${language.name} analysis failed:`, err);
       }
     }
 
     if (languagesProcessed === 0) {
+      fs.closeSync(ndjsonFd);
       console.error("\n❌ No languages were successfully processed");
       return { success: false, error: "No languages were successfully processed" };
     }
 
-    // Step 2.5: Process config files (always run for all repositories)
+    // Step 2.5: Process config files (always run - these are few root-level files)
+    const configStats = {
+      totalConfigFiles: 0,
+      byType: { json: 0, yaml: 0, docker: 0, env: 0, xml: 0, ini: 0, toml: 0, python: 0, gradle: 0, other: 0 },
+      packageManagers: [],
+      dockerInfo: { hasDockerfile: false, hasDockerCompose: false, services: [], exposedPorts: [] },
+      buildTools: [],
+      dependencies: { total: 0, production: 0, development: 0 }
+    };
+
     try {
       const configData = analyzeConfigRepo(repoPath);
       if (configData && configData.length > 0) {
-        const configResult = { language: "config", name: "Configuration Files", data: configData };
-        const { projectMetaData } = mergeLanguageOutputs([configResult], repoPath, outputDir, ndjsonPath);
-        accumulatedMetaData = mergeProjectMetaData(accumulatedMetaData, projectMetaData);
+        for (const file of configData) {
+          const filePath = path.join(repoPath, file.path);
+          const loc = countLinesOfCode(filePath);
+          totalLinesOfCode += loc;
+
+          const baseFields = ["path", "fileName", "fileType", "size", "lines", "language"];
+          const metadata = {};
+          Object.keys(file).forEach(key => {
+            if (!baseFields.includes(key)) {
+              metadata[key] = file[key];
+            }
+          });
+
+          const configFileData = { path: file.path, type: "config", language: "config", loc, metadata };
+          fs.writeSync(ndjsonFd, JSON.stringify(configFileData) + '\n');
+          totalFiles++;
+          configStats.totalConfigFiles++;
+
+          if (file.fileType && configStats.byType.hasOwnProperty(file.fileType)) {
+            configStats.byType[file.fileType]++;
+          }
+          if (file.fileName === "package.json" && file.packageInfo) {
+            configStats.packageManagers.push("npm");
+            if (file.packageInfo.dependencies) configStats.dependencies.production += file.packageInfo.dependencies.length;
+            if (file.packageInfo.devDependencies) configStats.dependencies.development += file.packageInfo.devDependencies.length;
+            configStats.dependencies.total = configStats.dependencies.production + configStats.dependencies.development;
+          }
+          if (file.fileType === "docker") {
+            configStats.dockerInfo.hasDockerfile = true;
+            if (file.dockerInfo && file.dockerInfo.exposedPorts) configStats.dockerInfo.exposedPorts.push(...file.dockerInfo.exposedPorts);
+          }
+          if (file.fileName && file.fileName.includes("docker-compose")) {
+            configStats.dockerInfo.hasDockerCompose = true;
+            if (file.dockerCompose && file.dockerCompose.services) configStats.dockerInfo.services.push(...file.dockerCompose.services);
+            if (file.dockerCompose && file.dockerCompose.exposedPorts) configStats.dockerInfo.exposedPorts.push(...file.dockerCompose.exposedPorts);
+          }
+          if (file.fileName === "pom.xml") {
+            configStats.packageManagers.push("maven");
+            configStats.buildTools.push("maven");
+            if (file.mavenInfo && file.mavenInfo.dependencyCount) configStats.dependencies.total += file.mavenInfo.dependencyCount;
+          }
+          if (file.fileName === "tsconfig.json") configStats.buildTools.push("typescript");
+          if (file.fileType === "python") {
+            if (file.fileName === "requirements.txt" && file.dependencyCount) {
+              configStats.dependencies.total += file.dependencyCount;
+              if (!configStats.packageManagers.includes("pip")) configStats.packageManagers.push("pip");
+            }
+            if (file.fileName === "Pipfile" && !configStats.packageManagers.includes("pipenv")) configStats.packageManagers.push("pipenv");
+            if (file.fileName === "setup.py") configStats.buildTools.push("setuptools");
+          }
+          if (file.fileType === "gradle") {
+            if (!configStats.packageManagers.includes("gradle")) configStats.packageManagers.push("gradle");
+            if (!configStats.buildTools.includes("gradle")) configStats.buildTools.push("gradle");
+            if (file.dependencyCount) configStats.dependencies.total += file.dependencyCount;
+          }
+        }
       }
     } catch (err) {
       console.warn(`\n⚠️  Config file processing failed: ${err.message}`);
     }
 
-    // Prepend projectMetaData as the first line of NDJSON
-    const existingNdjson = fs.existsSync(ndjsonPath) ? fs.readFileSync(ndjsonPath, 'utf-8') : '';
-    fs.writeFileSync(ndjsonPath, JSON.stringify({ __type: "projectMetaData", ...accumulatedMetaData }) + '\n' + existingNdjson);
+    fs.closeSync(ndjsonFd);
 
-    // Gzip the NDJSON file
+    // Deduplicate config arrays
+    configStats.packageManagers = [...new Set(configStats.packageManagers)];
+    configStats.buildTools = [...new Set(configStats.buildTools)];
+    configStats.dockerInfo.services = [...new Set(configStats.dockerInfo.services)];
+    configStats.dockerInfo.exposedPorts = [...new Set(configStats.dockerInfo.exposedPorts)];
+
+    // Add language file counts
+    Object.entries(languageFileCount).forEach(([lang, count]) => {
+      configStats.byType[lang] = count;
+    });
+
+    const projectMetaData = {
+      repositoryPath: repoPath,
+      repositoryName: path.basename(repoPath),
+      analyzedLanguages,
+      totalFiles,
+      totalFunctions,
+      totalClasses,
+      totalLinesOfCode,
+      configs: configStats,
+      generatedAt: new Date().toISOString(),
+      toolVersion: "1.0.0"
+    };
+
+    // Log summary
+    console.log(`\n✅ Processing complete!`);
+    console.log(`   - Languages: ${analyzedLanguages.join(", ")}`);
+    console.log(`   - Total files: ${totalFiles}`);
+    console.log(`   - Code files: ${totalFiles - configStats.totalConfigFiles}`);
+    console.log(`   - Config files: ${configStats.totalConfigFiles}`);
+    console.log(`   - Total functions: ${totalFunctions}`);
+    console.log(`   - Total classes: ${totalClasses}`);
+    console.log(`   - Total lines of code: ${totalLinesOfCode}`);
+
+    // Prepend projectMetaData using streaming (avoid reading entire file into memory)
+    const tmpPath = ndjsonPath + '.tmp';
+    const metaLine = JSON.stringify({ __type: "projectMetaData", ...projectMetaData }) + '\n';
+    await new Promise((resolve, reject) => {
+      const ws = fs.createWriteStream(tmpPath);
+      ws.write(metaLine);
+      const rs = fs.createReadStream(ndjsonPath);
+      rs.pipe(ws);
+      ws.on('finish', resolve);
+      ws.on('error', reject);
+      rs.on('error', reject);
+    });
+    fs.renameSync(tmpPath, ndjsonPath);
+
+    // Streaming gzip (avoid loading entire file into memory)
     const gzipPath = ndjsonPath + '.gz';
-    const ndjsonContent = fs.readFileSync(ndjsonPath);
-    const gzipped = zlib.gzipSync(ndjsonContent);
-    fs.writeFileSync(gzipPath, gzipped);
+    await new Promise((resolve, reject) => {
+      const input = fs.createReadStream(ndjsonPath);
+      const gzip = zlib.createGzip();
+      const output = fs.createWriteStream(gzipPath);
+      input.pipe(gzip).pipe(output);
+      output.on('finish', resolve);
+      output.on('error', reject);
+    });
 
     // Remove the uncompressed NDJSON file
     fs.unlinkSync(ndjsonPath);

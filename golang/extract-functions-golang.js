@@ -2,7 +2,10 @@ const Parser = require("tree-sitter");
 const Go = require("tree-sitter-go");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode } = require("../utils");
+const { truncateSourceCode, parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(Go);
 
 // -------------------------------------------------------------
 // Helpers for go.mod resolution
@@ -25,12 +28,7 @@ function readModuleName(goModPath) {
 }
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false) {
-  const source = fs.readFileSync(filePath, "utf8");
-
-  const parser = new Parser();
-  parser.setLanguage(Go);
-
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const functions = [];
 
@@ -208,10 +206,7 @@ function traverse(node, cb) {
 }
 
 function extractImports(filePath) {
-  const source = fs.readFileSync(filePath, "utf8");
-  const parser = new Parser();
-  parser.setLanguage(Go);
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const imports = [];
 

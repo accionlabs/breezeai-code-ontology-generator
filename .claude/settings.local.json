@@ -10,7 +10,12 @@
       "Bash(npm search:*)",
       "WebFetch(domain:www.npmjs.com)",
       "Bash(npm install:*)",
-      "Bash(npm rebuild:*)"
+      "Bash(npm rebuild:*)",
+      "Bash(node -e \"require\\('./main.js'\\)\" 2>&1 | head -20)",
+      "Bash(node --check main.js 2>&1 && echo \"main.js: OK\"\nnode --check typescript/file-tree-mapper-typescript.js 2>&1 && echo \"ts-mapper: OK\"\nnode --check nodejs/file-tree-mapper-nodejs.js 2>&1 && echo \"nodejs-mapper: OK\"\nnode --check python/file-tree-mapper-python.js 2>&1 && echo \"python-mapper: OK\"\nnode --check golang/file-tree-mapper-golang.js 2>&1 && echo \"golang-mapper: OK\"\nnode --check java/file-tree-main-java.js 2>&1 && echo \"java-mapper: OK\"\nnode --check csharp/file-tree-mapper-csharp.js 2>&1 && echo \"csharp-mapper: OK\"\nnode --check salesforce/file-tree-mapper-salesforce.js 2>&1 && echo \"sf-mapper: OK\"\nnode --check php/file-tree-mapper-php.js 2>&1 && echo \"php-mapper: OK\"\nnode --check vbnet/file-tree-mapper-vbnet.js 2>&1 && echo \"vbnet-mapper: OK\")",
+      "Bash(ls test/ 2>/dev/null && cat test/*.js 2>/dev/null | head -30 || echo \"No test files found\")",
+      "Bash(grep -n \"fs.readFileSync.*utf8\" typescript/extract-*.js nodejs/extract-*.js python/extract-*.js java/extract-*.js csharp/extract-*.js golang/extract-*.js salesforce/extract-*.js php/extract-*.js vbnet/extract-*.js 2>/dev/null)",
+      "Bash(node --check java/extract-functions-java.js 2>&1 && echo \"OK\" || echo \"FAIL\")"
     ]
   }
 }

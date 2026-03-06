@@ -80,7 +80,7 @@ function extractImports(filePath) {
 // -------------------------------------------------------------
 function analyzeImports(repoPath, opts = {}) {
   const goFiles = getGoFiles(repoPath);
-  const results = [];
+  const results = opts.onResult ? null : [];
   const totalFiles = goFiles.length;
 
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -151,13 +151,18 @@ function analyzeImports(repoPath, opts = {}) {
       const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
-      results.push({
+      const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions,
         classes,
-      });
+      };
+      if (opts.onResult) {
+        opts.onResult(fileResult);
+      } else {
+        results.push(fileResult);
+      }
     } catch (e) {
       console.log(`\n❌ Error analyzing ${file}:`, e);
     }
@@ -165,9 +170,9 @@ function analyzeImports(repoPath, opts = {}) {
 
   // Clear the progress line and show completion
   process.stdout.write(`\r${' '.repeat(120)}\r`);
-  console.log(`✅ Processed ${results.length}/${totalFiles} Go files\n`);
+  console.log(`✅ Processed ${totalFiles} Go files\n`);
 
-  return results;
+  return results || [];
 }
 
 // -------------------------------------------------------------

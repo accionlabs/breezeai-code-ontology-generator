@@ -2,15 +2,13 @@ const Parser = require("tree-sitter");
 const Java = require("tree-sitter-java");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode } = require("../utils");
+const { truncateSourceCode, parseSource, readSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(Java);
 
 function extractFunctionsWithCalls(filePath, repoPath = null, classIndex = {}, captureSourceCode = false) {
-  const source = fs.readFileSync(filePath, "utf8");
-
-  const parser = new Parser();
-  parser.setLanguage(Java);
-
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const functions = [];
 
@@ -180,10 +178,7 @@ function traverse(node, cb) {
 
 // Extract imports from a file
 function extractImports(filePath, classIndex) {
-  const source = fs.readFileSync(filePath, "utf8");
-  const parser = new Parser();
-  parser.setLanguage(Java);
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const imports = {
     importFiles: [],
@@ -260,7 +255,7 @@ function extractFunctionsAndCalls(filePath, repoPath, classIndex, captureSourceC
     const imports = extractImports(filePath, classIndex);
 
     // Build function and class map for call resolution
-    const source = fs.readFileSync(filePath, "utf8");
+    const source = readSource(filePath);
     const functionMap = new Map();
 
     // Map local functions

@@ -254,7 +254,7 @@ function analyzeVBNetRepo(repoPath, opts = {}) {
   const { classIndex, fqcnIndex, methodIndex, functionIndex } = buildClassIndexWithRegex(vbnetFiles, repoPath);
   console.log(`✅ Found ${Object.keys(classIndex).length} types and ${Object.keys(methodIndex).length} methods across ${totalFiles} files\n`);
 
-  const results = [];
+  const results = opts.onResult ? null : [];
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let spinnerIndex = 0;
 
@@ -324,13 +324,18 @@ function analyzeVBNetRepo(repoPath, opts = {}) {
         });
       });
 
-      results.push({
+      const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions: analysis.functions,
         classes: analysis.classes
-      });
+      };
+      if (opts.onResult) {
+        opts.onResult(fileResult);
+      } else {
+        results.push(fileResult);
+      }
     } catch (e) {
       process.stdout.write('\n');
       console.log(`❌ Error analyzing file: ${file} - ${e.message}`);
@@ -340,7 +345,7 @@ function analyzeVBNetRepo(repoPath, opts = {}) {
   process.stdout.write('\r' + ' '.repeat(150) + '\r');
   console.log(`✅ Completed processing ${totalFiles} VB.NET files\n`);
 
-  return results;
+  return results || [];
 }
 
 // -------------------------------------------------------------

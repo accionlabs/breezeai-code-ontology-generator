@@ -2,14 +2,13 @@ const Parser = require("tree-sitter");
 const Go = require("tree-sitter-go");
 const fs = require("fs");
 const path = require("path");
+const { parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(Go);
 
 function extractClasses(filePath, repoPath = null) {
-  const source = fs.readFileSync(filePath, "utf8");
-
-  const parser = new Parser();
-  parser.setLanguage(Go);
-
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const classes = [];
 

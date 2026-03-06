@@ -120,7 +120,7 @@ function analyzeImports(repoPath, mapper, opts = {}) {
   const jsFiles = getJsFiles(repoPath)
 
 
-  const results = [];
+  const results = opts.onResult ? null : [];
   const totalFiles = jsFiles.length;
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let spinnerIndex = 0;
@@ -243,13 +243,18 @@ function analyzeImports(repoPath, mapper, opts = {}) {
 
       const classes = extractClasses(file, repoPath)
 
-      results.push({
+      const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions: functions,
         classes
-      });
+      };
+      if (opts.onResult) {
+        opts.onResult(fileResult);
+      } else {
+        results.push(fileResult);
+      }
     } catch (e) {
       process.stdout.write('\n');
       console.log(`❌ Error analyzing file: ${file} - ${e.message}`);
@@ -260,7 +265,7 @@ function analyzeImports(repoPath, mapper, opts = {}) {
   process.stdout.write('\r' + ' '.repeat(150) + '\r');
   console.log(`✅ Completed processing ${totalFiles} files\n`);
 
-  return results;
+  return results || [];
 }
 
 // -------------------------------------------------------------
@@ -272,8 +277,10 @@ function analyzeJavaScriptRepo(repoPath, opts = {}) {
   const mapper = buildPackageMapper(repoPath);
   const analysis = analyzeImports(repoPath, mapper, opts);
 
-  console.log(`\n📊 Summary:`);
-  console.log(`   JavaScript files: ${analysis.length}`);
+  if (!opts.onResult) {
+    console.log(`\n📊 Summary:`);
+    console.log(`   JavaScript files: ${analysis.length}`);
+  }
 
   return analysis;
 }

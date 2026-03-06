@@ -38,4 +38,39 @@ function truncateSourceCode(rawSource) {
   return result;
 }
 
-module.exports = { truncateSourceCode };
+// -----------------------------------------------------------
+// Source cache: avoids reading + parsing the same file multiple
+// times when extractImports, extractFunctions, and extractClasses
+// are called sequentially for the same file.
+// -----------------------------------------------------------
+const fs = require("fs");
+
+let _cachedPath = null;
+let _cachedSource = null;
+let _cachedTree = null;
+
+/**
+ * Read file contents with single-entry cache.
+ * Consecutive calls for the same filePath return the cached string.
+ */
+function readSource(filePath) {
+  if (_cachedPath === filePath && _cachedSource !== null) return _cachedSource;
+  _cachedPath = filePath;
+  _cachedSource = fs.readFileSync(filePath, "utf8");
+  _cachedTree = null; // invalidate tree when file changes
+  return _cachedSource;
+}
+
+/**
+ * Parse file with tree-sitter, caching both source and tree.
+ * If the same filePath was already parsed (by any parser using the
+ * same grammar), the cached tree is returned directly.
+ */
+function parseSource(filePath, parser) {
+  const source = readSource(filePath);
+  if (_cachedTree) return { source, tree: _cachedTree };
+  _cachedTree = parser.parse(source);
+  return { source, tree: _cachedTree };
+}
+
+module.exports = { truncateSourceCode, readSource, parseSource };

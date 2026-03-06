@@ -1,15 +1,14 @@
 const Parser = require("tree-sitter");
 const VBNet = require("tree-sitter-vb-dotnet");
 const fs = require("fs");
+const { parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(VBNet);
 
 function extractClasses(filePath, repoPath = null) {
   try {
-    const source = fs.readFileSync(filePath, "utf8");
-
-    const parser = new Parser();
-    parser.setLanguage(VBNet);
-
-    const tree = parser.parse(source);
+    const { source, tree } = parseSource(filePath, sharedParser);
 
     const classes = [];
 
