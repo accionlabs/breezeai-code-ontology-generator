@@ -261,7 +261,7 @@ function analyzeApexFiles(repoPath, classIndex, opts = {}) {
       }
 
       // Extract functions and classes
-      const functions = extractFunctionsAndCalls(file, repoPath, classIndex, opts.captureSourceCode);
+      const functions = extractFunctionsAndCalls(file, repoPath, classIndex, references, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
       const fileResult = {

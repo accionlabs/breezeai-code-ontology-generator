@@ -367,10 +367,10 @@ function resolveImportPath(importSource, currentFilePath, repoPath) {
 }
 
 
-function extractFuncitonAndItsCalls(filePath, repoPath, captureSourceCode = false) {
+function extractFuncitonAndItsCalls(filePath, repoPath, imports = null, captureSourceCode = false) {
  try {
       const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
-      const imports = extractImports(filePath);
+      if (!imports) imports = extractImports(filePath);
 
 
       const functionMap = new Map();
@@ -397,4 +397,4 @@ function extractFuncitonAndItsCalls(filePath, repoPath, captureSourceCode = fals
     }
 }
 
-module.exports = { extractFuncitonAndItsCalls };
+module.exports = { extractFuncitonAndItsCalls, extractImports };

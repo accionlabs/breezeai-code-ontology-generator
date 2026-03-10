@@ -383,10 +383,10 @@ function resolveImportPath(importSource, currentFilePath, repoPath) {
   return null;
 }
 
-function extractFunctionsAndCalls(filePath, repoPath, captureSourceCode = false) {
+function extractFunctionsAndCalls(filePath, repoPath, imports = null, captureSourceCode = false) {
   try {
     const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
-    const imports = extractImports(filePath);
+    if (!imports) imports = extractImports(filePath);
 
     const functionMap = new Map();
 

@@ -170,7 +170,7 @@ function analyzeTypeScriptFiles(repoPath, pathAliases, opts = {}) {
       }
 
       // Extract functions and classes
-      const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode);
+      const functions = extractFunctionsAndCalls(file, repoPath, imports, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
       const fileResult = {

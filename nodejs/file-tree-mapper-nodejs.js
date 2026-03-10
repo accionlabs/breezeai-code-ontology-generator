@@ -12,7 +12,7 @@ const path = require("path");
 const glob = require("glob");
 const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
-const { extractFuncitonAndItsCalls } = require("./extract-functions-nodejs");
+const { extractFuncitonAndItsCalls, extractImports: extractImportsJS } = require("./extract-functions-nodejs");
 const { extractClasses } = require("./extract-classes-nodejs");
 
 // -------------------------------------------------------------
@@ -139,7 +139,7 @@ function analyzeImports(repoPath, mapper, opts = {}) {
       process.stdout.write(`\r${spinner} Processing: ${i}/${totalFiles} (${percentage}%) - ${fileName.substring(0, 60).padEnd(60, ' ')}`);
       spinnerIndex++;
 
-      const { imports } = extractImports(file);
+      const imports = extractImportsJS(file);
       const importFiles = [];
       const externalImports = [];
 
@@ -173,7 +173,8 @@ function analyzeImports(repoPath, mapper, opts = {}) {
         return null;
       }
 
-      for (let imp of imports) {
+      for (let impObj of imports) {
+        const imp = impObj.source;
         let resolvedPath = null;
         let isResolved = false;
 
@@ -239,7 +240,7 @@ function analyzeImports(repoPath, mapper, opts = {}) {
       }
 
       // Extract functions for this file
-      const functions = extractFuncitonAndItsCalls(file, repoPath, opts.captureSourceCode);
+      const functions = extractFuncitonAndItsCalls(file, repoPath, imports, opts.captureSourceCode);
 
       const classes = extractClasses(file, repoPath)
 
