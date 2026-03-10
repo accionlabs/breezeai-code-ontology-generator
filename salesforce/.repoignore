@@ -1,0 +1,14 @@
+################################################
+# SALESFORCE APEX
+################################################
+
+# Salesforce CLI directories
+.sfdx/
+.sf/
+.localdevserver/
+
+# Static resources (binary assets)
+force-app/**/staticresources/
+
+# Metadata files
+*.resource-meta.xml

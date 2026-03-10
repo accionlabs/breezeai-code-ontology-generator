@@ -1,0 +1,10 @@
+################################################
+# VB.NET
+################################################
+
+# Project references
+My Project/
+
+# Designer files
+*.Designer.vb
+*.designer.vb

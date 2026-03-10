@@ -1,0 +1,34 @@
+################################################
+# JAVASCRIPT / NODE / TYPESCRIPT
+################################################
+
+# Dependencies
+node_modules/
+bower_components/
+
+# Build output
+dist/
+build/
+out/
+
+# Framework-specific
+.next/
+.nuxt/
+.turbo/
+.vercel/
+.parcel-cache/
+
+# Vendor (bundled third-party)
+vendor/
+
+# Minified/Bundled files
+*.min.js
+*.min.css
+*.map
+*.bundle.js
+*.chunk.js
+
+# Lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml

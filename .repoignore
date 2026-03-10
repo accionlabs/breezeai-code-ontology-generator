@@ -1,116 +1,27 @@
 ################################################
 # COMMON DIRECTORIES
+# (Shared across all languages)
 ################################################
 
+# Version control
 .git/
 .svn/
 .hg/
+
+# IDE / Editor
 .idea/
 .vscode/
+
+# OS files
 .DS_Store
+
+# Common directories
 coverage/
 logs/
 tmp/
 temp/
 .cache/
 .history/
-
-################################################
-# ASP.NET / C#
-################################################
-
-bin/
-obj/
-packages/
-.nuget/
-Migrations/
-
-wwwroot/assets/global/plugins/
-wwwroot/lib/
-wwwroot/vendor/
-wwwroot/vendors/
-Scripts/bundles/
-
-################################################
-# JAVASCRIPT / NODE / TYPESCRIPT
-################################################
-
-node_modules/
-bower_components/
-dist/
-build/
-out/
-.next/
-.nuxt/
-.turbo/
-.vercel/
-.parcel-cache/
-vendor/
-
-################################################
-# PHP
-################################################
-
-vendor/
-storage/framework/
-bootstrap/cache/
-public/assets/vendor/
-public/build/
-
-################################################
-# GO
-################################################
-
-vendor/
-pkg/mod/
-.cache/go-build/
-testdata/
-
-################################################
-# SALESFORCE APEX
-################################################
-
-.sfdx/
-.sf/
-.localdevserver/
-force-app/**/staticresources/
-
-################################################
-# JAVA / JVM
-################################################
-
-target/
-.gradle/
-build/
-.m2/
-lib/
-generated-sources/
-generated-test-sources/
-out/
-
-################################################
-# VB.NET
-################################################
-
-My Project/
-
-################################################
-# PYTHON
-################################################
-
-venv/
-.venv/
-env/
-.env/
-__pycache__/
-.eggs/
-*.egg-info
-site-packages/
-.tox/
-.mypy_cache/
-.pytest_cache/
-dist/
-build/
 
 ################################################
 # TESTS (OPTIONAL FOR ARCHITECTURE ANALYSIS)
@@ -136,56 +47,6 @@ documentation/
 examples/
 samples/
 demo/
-
-################################################
-# FILE PATTERNS
-################################################
-
-# ASP.NET
-*.designer.cs
-*.generated.cs
-*.AssemblyInfo.cs
-Reference.cs
-*.edmx.diagram
-
-# JS / TS
-*.min.js
-*.min.css
-*.map
-*.bundle.js
-*.chunk.js
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-
-# PHP
-composer.lock
-autoload_*.php
-
-# GO
-go.sum
-*_generated.go
-*.pb.go
-*_string.go
-
-# JAVA
-*.class
-*.jar
-
-# VB.NET
-*.Designer.vb
-*.designer.vb
-
-# SALESFORCE
-*.resource-meta.xml
-
-# PYTHON
-*.pyc
-*.pyo
-*.egg
-setup.cfg
-pip-log.txt
-*_pb2.py
 
 ################################################
 # BINARY / STATIC ASSETS
@@ -241,3 +102,9 @@ pip-log.txt
 *.bak
 *.swp
 *.lock
+
+################################################
+# LANGUAGE-SPECIFIC PATTERNS
+# See .repoignore.d/ folder for language-specific
+# ignore patterns (aspnet, javascript, php, etc.)
+################################################

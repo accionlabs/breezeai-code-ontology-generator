@@ -14,6 +14,19 @@ const patternCache = new Map();
 // Path to the tool's built-in .repoignore file
 const TOOL_REPOIGNORE_PATH = path.join(__dirname, ".repoignore");
 
+// Language-specific folders containing .repoignore files
+const LANGUAGE_FOLDERS = [
+  "csharp",
+  "golang",
+  "java",
+  "nodejs",
+  "php",
+  "python",
+  "salesforce",
+  "typescript",
+  "vbnet"
+];
+
 /**
  * Convert a single .repoignore pattern to glob format
  * @param {string} pattern - Raw pattern from .repoignore
@@ -113,6 +126,34 @@ function parseRepoIgnoreFile(filePath) {
 }
 
 /**
+ * Parse .repoignore files from all language folders
+ * @param {string} basePath - Base path where language folders are located
+ * @returns {string[]} - Array of glob-compatible patterns from all language folders
+ */
+function parseLanguageFolderIgnores(basePath) {
+  const allPatterns = [];
+
+  for (const folder of LANGUAGE_FOLDERS) {
+    const repoIgnorePath = path.join(basePath, folder, ".repoignore");
+    if (fs.existsSync(repoIgnorePath)) {
+      const patterns = parseRepoIgnoreFile(repoIgnorePath);
+      allPatterns.push(...patterns);
+    }
+  }
+
+  return allPatterns;
+}
+
+/**
+ * Get count of language-specific patterns (for logging)
+ * @param {string} basePath - Base path where language folders are located
+ * @returns {number} - Count of patterns from all language folders
+ */
+function countLanguagePatterns(basePath) {
+  return parseLanguageFolderIgnores(basePath).length;
+}
+
+/**
  * Get ignore patterns for a repository (without repoPath prefix)
  * These patterns can be used with glob's cwd option
  * @param {string} repoPath - Target repository path
@@ -126,10 +167,16 @@ function getIgnorePatterns(repoPath, options = {}) {
 
   const allPatterns = new Set();
 
-  // 1. Load tool's built-in patterns
+  // 1. Load tool's built-in common patterns
   if (includeBuiltin) {
     const builtinPatterns = parseRepoIgnoreFile(TOOL_REPOIGNORE_PATH);
     for (const p of builtinPatterns) {
+      allPatterns.add(p);
+    }
+
+    // 1b. Load language-specific patterns from language folders
+    const languagePatterns = parseLanguageFolderIgnores(__dirname);
+    for (const p of languagePatterns) {
       allPatterns.add(p);
     }
   }
@@ -223,7 +270,8 @@ function logIgnoreInfo(repoPath, verbose = false) {
   const hasRepoIgnore = fs.existsSync(repoIgnorePath);
 
   console.log("\n📋 Ignore Patterns Configuration:");
-  console.log(`   Built-in patterns: ${parseRepoIgnoreFile(TOOL_REPOIGNORE_PATH).length}`);
+  console.log(`   Built-in common patterns: ${parseRepoIgnoreFile(TOOL_REPOIGNORE_PATH).length}`);
+  console.log(`   Built-in language patterns: ${countLanguagePatterns(__dirname)}`);
 
   if (hasRepoIgnore) {
     const repoPatterns = parseRepoIgnoreFile(repoIgnorePath);
@@ -287,6 +335,7 @@ module.exports = {
   getIgnorePatterns,
   getIgnorePatternsWithPrefix,
   parseRepoIgnoreFile,
+  parseLanguageFolderIgnores,
   convertToGlobPattern,
   clearCache,
   getToolRepoIgnorePath,
