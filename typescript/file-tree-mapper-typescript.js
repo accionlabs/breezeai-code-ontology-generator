@@ -20,7 +20,7 @@ const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 // Get TypeScript files only
 // -------------------------------------------------------------
 function getTsFilesOnly(repoPath, ignorePatterns = null) {
-  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'typescript' });
   return glob.sync(`${repoPath}/**/*.{ts,tsx}`, {
     ignore: patterns
   });
@@ -30,7 +30,7 @@ function getTsFilesOnly(repoPath, ignorePatterns = null) {
 // Get JavaScript files only
 // -------------------------------------------------------------
 function getJsFilesOnly(repoPath, ignorePatterns = null) {
-  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'typescript' });
   return glob.sync(`${repoPath}/**/*.{js,jsx}`, {
     ignore: patterns
   });

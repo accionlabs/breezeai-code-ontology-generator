@@ -126,31 +126,32 @@ function parseRepoIgnoreFile(filePath) {
 }
 
 /**
- * Parse .repoignore files from all language folders
+ * Parse .repoignore file for a specific language folder
  * @param {string} basePath - Base path where language folders are located
- * @returns {string[]} - Array of glob-compatible patterns from all language folders
+ * @param {string} language - Language folder name (e.g., 'php', 'csharp')
+ * @returns {string[]} - Array of glob-compatible patterns for that language
  */
-function parseLanguageFolderIgnores(basePath) {
-  const allPatterns = [];
-
-  for (const folder of LANGUAGE_FOLDERS) {
-    const repoIgnorePath = path.join(basePath, folder, ".repoignore");
-    if (fs.existsSync(repoIgnorePath)) {
-      const patterns = parseRepoIgnoreFile(repoIgnorePath);
-      allPatterns.push(...patterns);
-    }
+function parseLanguageFolderIgnores(basePath, language) {
+  if (!language || !LANGUAGE_FOLDERS.includes(language)) {
+    return [];
   }
 
-  return allPatterns;
+  const repoIgnorePath = path.join(basePath, language, ".repoignore");
+  if (fs.existsSync(repoIgnorePath)) {
+    return parseRepoIgnoreFile(repoIgnorePath);
+  }
+
+  return [];
 }
 
 /**
  * Get count of language-specific patterns (for logging)
  * @param {string} basePath - Base path where language folders are located
- * @returns {number} - Count of patterns from all language folders
+ * @param {string} language - Language folder name (e.g., 'php', 'csharp')
+ * @returns {number} - Count of patterns for that language
  */
-function countLanguagePatterns(basePath) {
-  return parseLanguageFolderIgnores(basePath).length;
+function countLanguagePatterns(basePath, language) {
+  return parseLanguageFolderIgnores(basePath, language).length;
 }
 
 /**
@@ -160,10 +161,11 @@ function countLanguagePatterns(basePath) {
  * @param {Object} options - Configuration options
  * @param {boolean} options.includeBuiltin - Include tool's built-in patterns (default: true)
  * @param {boolean} options.includeRepoIgnore - Check for repo's .repoignore (default: true)
+ * @param {string} options.language - Language folder name (e.g., 'php', 'csharp') for language-specific patterns
  * @returns {string[]} - Array of glob patterns
  */
 function getIgnorePatterns(repoPath, options = {}) {
-  const { includeBuiltin = true, includeRepoIgnore = true } = options;
+  const { includeBuiltin = true, includeRepoIgnore = true, language = null } = options;
 
   const allPatterns = new Set();
 
@@ -174,10 +176,12 @@ function getIgnorePatterns(repoPath, options = {}) {
       allPatterns.add(p);
     }
 
-    // 1b. Load language-specific patterns from language folders
-    const languagePatterns = parseLanguageFolderIgnores(__dirname);
-    for (const p of languagePatterns) {
-      allPatterns.add(p);
+    // 1b. Load language-specific patterns (only for the specified language)
+    if (language) {
+      const languagePatterns = parseLanguageFolderIgnores(__dirname, language);
+      for (const p of languagePatterns) {
+        allPatterns.add(p);
+      }
     }
   }
 
@@ -263,15 +267,18 @@ function findSkippedFiles(repoPath, filePattern, options = {}) {
  * Log information about ignore patterns and skipped files
  * @param {string} repoPath - Target repository path
  * @param {boolean} verbose - Whether to show detailed output
+ * @param {string} language - Language folder name (e.g., 'php', 'csharp')
  */
-function logIgnoreInfo(repoPath, verbose = false) {
-  const patterns = getIgnorePatterns(repoPath);
+function logIgnoreInfo(repoPath, verbose = false, language = null) {
+  const patterns = getIgnorePatterns(repoPath, { language });
   const repoIgnorePath = path.join(repoPath, ".repoignore");
   const hasRepoIgnore = fs.existsSync(repoIgnorePath);
 
   console.log("\n📋 Ignore Patterns Configuration:");
   console.log(`   Built-in common patterns: ${parseRepoIgnoreFile(TOOL_REPOIGNORE_PATH).length}`);
-  console.log(`   Built-in language patterns: ${countLanguagePatterns(__dirname)}`);
+  if (language) {
+    console.log(`   Language patterns (${language}): ${countLanguagePatterns(__dirname, language)}`);
+  }
 
   if (hasRepoIgnore) {
     const repoPatterns = parseRepoIgnoreFile(repoIgnorePath);

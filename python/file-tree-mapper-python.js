@@ -18,7 +18,7 @@ const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 // Get Python files
 // -------------------------------------------------------------
 function getPythonFiles(repoPath, ignorePatterns = null) {
-  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'python' });
   return glob.sync(`${repoPath}/**/*.py`, {
     ignore: patterns
   });

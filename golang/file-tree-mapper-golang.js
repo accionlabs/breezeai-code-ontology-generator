@@ -27,7 +27,7 @@ function getNodeText(node, sourceText) {
 }
 
 function getGoFiles(repoPath, ignorePatterns = null) {
-  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'golang' });
   return glob.sync(`${repoPath}/**/*.go`, {
     ignore: patterns,
   });

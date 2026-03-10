@@ -17,7 +17,7 @@ const { getIgnorePatterns, getIgnorePatternsWithPrefix } = require("../ignore-pa
 // ---------- class index ----------
 function buildJavaClassIndex(repoPath) {
   const index = {};
-  const ignorePatterns = getIgnorePatterns(repoPath);
+  const ignorePatterns = getIgnorePatterns(repoPath, { language: 'java' });
 
   const files = glob.sync("**/*.java", {
     cwd: repoPath,
@@ -43,7 +43,7 @@ function buildJavaClassIndex(repoPath) {
 function analyzeJavaRepo(repoPath, opts = {}) {
   return new Promise((resolve, reject) => {
     console.log(`📂 Scanning Java repo: ${repoPath}`);
-    const ignorePatterns = getIgnorePatternsWithPrefix(repoPath);
+    const ignorePatterns = getIgnorePatternsWithPrefix(repoPath, { language: 'java' });
 
     const javaFiles = glob.sync(`${repoPath}/**/*.java`, {
       ignore: ignorePatterns

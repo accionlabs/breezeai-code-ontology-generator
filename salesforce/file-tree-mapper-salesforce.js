@@ -44,7 +44,7 @@ function getNodeText(node, sourceText) {
 // Step 1: Get Apex files
 // -------------------------------------------------------------
 function getApexFiles(repoPath, ignorePatterns = null) {
-  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'salesforce' });
   return glob.sync(`${repoPath}/**/*.{cls,trigger}`, {
     ignore: patterns,
   });
