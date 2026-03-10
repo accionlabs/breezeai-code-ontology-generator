@@ -7,7 +7,7 @@ bin/
 obj/
 packages/
 .nuget/
-Migrations/
+
 
 # Web asset directories
 wwwroot/assets/global/plugins/

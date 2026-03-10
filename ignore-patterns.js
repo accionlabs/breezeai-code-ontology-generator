@@ -54,21 +54,21 @@ function convertToGlobPattern(pattern) {
     return pattern;
   }
 
-  // Directory pattern ending with /
-  if (pattern.endsWith("/")) {
-    // node_modules/ -> **/node_modules/**
-    const dirName = pattern.slice(0, -1);
-    return `**/${dirName}/**`;
-  }
-
-  // Pattern starting with / (root-relative)
+  // Pattern starting with / (root-relative) - check BEFORE directory pattern
   if (pattern.startsWith("/")) {
-    // /bin/ -> bin/**
+    // /vendor/ -> vendor/** (root level only, won't match resources/views/vendor/)
     const stripped = pattern.slice(1);
     if (stripped.endsWith("/")) {
       return stripped + "**";
     }
     return stripped;
+  }
+
+  // Directory pattern ending with / (matches anywhere)
+  if (pattern.endsWith("/")) {
+    // node_modules/ -> **/node_modules/**
+    const dirName = pattern.slice(0, -1);
+    return `**/${dirName}/**`;
   }
 
   // Pattern with directory path (e.g., force-app/**/staticresources/)
@@ -303,17 +303,19 @@ function logIgnoreInfo(repoPath, verbose = false, language = null) {
  * Log skipped files for a specific file type
  * @param {string} repoPath - Target repository path
  * @param {string} filePattern - Glob pattern (e.g., "**\/*.js")
- * @param {string} language - Language name for display
+ * @param {string} languageName - Language name for display
  * @param {boolean} verbose - Whether to show all skipped files
+ * @param {string} languageKey - Language folder key for language-specific patterns (e.g., 'typescript', 'python')
  */
-function logSkippedFiles(repoPath, filePattern, language, verbose = false) {
+function logSkippedFiles(repoPath, filePattern, languageName, verbose = false, languageKey = null) {
   const { allFiles, filteredFiles, skippedFiles, skippedCount } = findSkippedFiles(
     repoPath,
-    filePattern
+    filePattern,
+    { language: languageKey }
   );
 
   if (skippedCount > 0) {
-    console.log(`\n⏭️  Skipped ${skippedCount} ${language} files (matched ignore patterns):`);
+    console.log(`\n⏭️  Skipped ${skippedCount} ${languageName} files (matched ignore patterns):`);
 
     if (verbose) {
       // Show all skipped files in verbose mode

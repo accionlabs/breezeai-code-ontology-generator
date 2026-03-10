@@ -52,6 +52,8 @@ demo/
 # BINARY / STATIC ASSETS
 ################################################
 
+fonts/
+
 *.svg
 *.png
 *.jpg

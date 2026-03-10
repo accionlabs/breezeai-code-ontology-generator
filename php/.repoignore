@@ -2,8 +2,8 @@
 # PHP
 ################################################
 
-# Composer dependencies
-vendor/
+# Composer dependencies (root level only, not resources/views/vendor/)
+/vendor/
 
 # Laravel/Framework cache
 storage/framework/
