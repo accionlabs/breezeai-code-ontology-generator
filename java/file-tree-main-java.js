@@ -12,14 +12,16 @@ const path = require("path");
 const fs = require("fs");
 const glob = require("glob");
 const os = require("os");
+const { getIgnorePatterns, getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // ---------- class index ----------
 function buildJavaClassIndex(repoPath) {
   const index = {};
+  const ignorePatterns = getIgnorePatterns(repoPath);
 
   const files = glob.sync("**/*.java", {
     cwd: repoPath,
-    ignore: ["**/target/**", "**/build/**", "**/node_modules/**"]
+    ignore: ignorePatterns
   });
 
   for (const file of files) {
@@ -41,9 +43,10 @@ function buildJavaClassIndex(repoPath) {
 function analyzeJavaRepo(repoPath, opts = {}) {
   return new Promise((resolve, reject) => {
     console.log(`📂 Scanning Java repo: ${repoPath}`);
+    const ignorePatterns = getIgnorePatternsWithPrefix(repoPath);
 
     const javaFiles = glob.sync(`${repoPath}/**/*.java`, {
-      ignore: ["**/target/**", "**/build/**", "**/node_modules/**"]
+      ignore: ignorePatterns
     });
 
     const classIndex = buildJavaClassIndex(repoPath);

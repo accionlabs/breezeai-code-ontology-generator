@@ -1,0 +1,243 @@
+################################################
+# COMMON DIRECTORIES
+################################################
+
+.git/
+.svn/
+.hg/
+.idea/
+.vscode/
+.DS_Store
+coverage/
+logs/
+tmp/
+temp/
+.cache/
+.history/
+
+################################################
+# ASP.NET / C#
+################################################
+
+bin/
+obj/
+packages/
+.nuget/
+Migrations/
+
+wwwroot/assets/global/plugins/
+wwwroot/lib/
+wwwroot/vendor/
+wwwroot/vendors/
+Scripts/bundles/
+
+################################################
+# JAVASCRIPT / NODE / TYPESCRIPT
+################################################
+
+node_modules/
+bower_components/
+dist/
+build/
+out/
+.next/
+.nuxt/
+.turbo/
+.vercel/
+.parcel-cache/
+vendor/
+
+################################################
+# PHP
+################################################
+
+vendor/
+storage/framework/
+bootstrap/cache/
+public/assets/vendor/
+public/build/
+
+################################################
+# GO
+################################################
+
+vendor/
+pkg/mod/
+.cache/go-build/
+testdata/
+
+################################################
+# SALESFORCE APEX
+################################################
+
+.sfdx/
+.sf/
+.localdevserver/
+force-app/**/staticresources/
+
+################################################
+# JAVA / JVM
+################################################
+
+target/
+.gradle/
+build/
+.m2/
+lib/
+generated-sources/
+generated-test-sources/
+out/
+
+################################################
+# VB.NET
+################################################
+
+My Project/
+
+################################################
+# PYTHON
+################################################
+
+venv/
+.venv/
+env/
+.env/
+__pycache__/
+.eggs/
+*.egg-info
+site-packages/
+.tox/
+.mypy_cache/
+.pytest_cache/
+dist/
+build/
+
+################################################
+# TESTS (OPTIONAL FOR ARCHITECTURE ANALYSIS)
+################################################
+
+tests/
+test/
+__tests__/
+spec/
+specs/
+
+*.test.*
+*.spec.*
+*.snap
+*.coverage
+
+################################################
+# DOCUMENTATION / EXAMPLES
+################################################
+
+docs/
+documentation/
+examples/
+samples/
+demo/
+
+################################################
+# FILE PATTERNS
+################################################
+
+# ASP.NET
+*.designer.cs
+*.generated.cs
+*.AssemblyInfo.cs
+Reference.cs
+*.edmx.diagram
+
+# JS / TS
+*.min.js
+*.min.css
+*.map
+*.bundle.js
+*.chunk.js
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# PHP
+composer.lock
+autoload_*.php
+
+# GO
+go.sum
+*_generated.go
+*.pb.go
+*_string.go
+
+# JAVA
+*.class
+*.jar
+
+# VB.NET
+*.Designer.vb
+*.designer.vb
+
+# SALESFORCE
+*.resource-meta.xml
+
+# PYTHON
+*.pyc
+*.pyo
+*.egg
+setup.cfg
+pip-log.txt
+*_pb2.py
+
+################################################
+# BINARY / STATIC ASSETS
+################################################
+
+*.svg
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.ico
+*.woff
+*.woff2
+*.ttf
+*.eot
+*.mp4
+*.mov
+*.avi
+*.mp3
+*.wav
+*.pdf
+
+################################################
+# LARGE DATA / MODELS
+################################################
+
+*.csv
+*.tsv
+*.parquet
+*.h5
+*.onnx
+*.pt
+*.pth
+*.ckpt
+
+################################################
+# ENV / CONFIG SECRETS
+################################################
+
+.env
+.env.*
+*.local
+*.secret
+
+################################################
+# LOG / TEMP FILES
+################################################
+
+*.log
+*.tmp
+*.cache
+*.bak
+*.swp
+*.lock

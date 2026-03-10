@@ -7,6 +7,7 @@ const Parser = require("tree-sitter");
 const Go = require("tree-sitter-go");
 const { extractFunctionsAndCalls, extractImports: extractImportsGo } = require("./extract-functions-golang");
 const { extractClasses } = require("./extract-classes-golang");
+const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 const parser = new Parser();
 parser.setLanguage(Go);
@@ -25,14 +26,10 @@ function getNodeText(node, sourceText) {
   return sourceText.slice(node.startIndex, node.endIndex);
 }
 
-function getGoFiles(repoPath) {
+function getGoFiles(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
   return glob.sync(`${repoPath}/**/*.go`, {
-    ignore: [
-      `${repoPath}/**/vendor/**`,
-      `${repoPath}/**/.git/**`,
-      `${repoPath}/**/dist/**`,
-      `${repoPath}/**/build/**`,
-    ],
+    ignore: patterns,
   });
 }
 
