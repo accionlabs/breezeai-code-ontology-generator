@@ -10,6 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const glob = require("glob");
 const { analyzeVBNetFileWithRegex } = require("./regex-parser-vbnet");
+const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // Try to load tree-sitter, but don't fail if it doesn't work
 let Parser, VBNet, treeSitterAvailable = false;
@@ -29,21 +30,10 @@ try {
 // -------------------------------------------------------------
 // Get VB.NET files
 // -------------------------------------------------------------
-function getVBNetFiles(repoPath) {
+function getVBNetFiles(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
   return glob.sync(`${repoPath}/**/*.vb`, {
-    ignore: [
-      `${repoPath}/**/bin/**`,              // Build output
-      `${repoPath}/**/obj/**`,              // Intermediate files
-      `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/.vs/**`,              // Visual Studio cache
-      `${repoPath}/**/packages/**`,         // NuGet packages
-      `${repoPath}/**/.git/**`,
-      `${repoPath}/**/My Project/**`,       // Auto-generated files
-      `${repoPath}/**/Reference.vb`,        // Service references
-      `${repoPath}/**/*.Designer.vb`,       // Designer files (capital D)
-      `${repoPath}/**/*.designer.vb`,       // Designer files (lowercase d)
-      `${repoPath}/**/AssemblyInfo.vb`      // Assembly info
-    ],
+    ignore: patterns,
     nocase: true  // Case-insensitive matching for file patterns
   });
 }

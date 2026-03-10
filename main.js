@@ -22,6 +22,7 @@ const { analyzeSalesforceRepo } = require("./salesforce/file-tree-mapper-salesfo
 const { analyzePHPRepo } = require("./php/file-tree-mapper-php");
 const { analyzeVBNetRepo } = require("./vbnet/file-tree-mapper-vbnet");
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
+const { getIgnorePatterns, logIgnoreInfo, logSkippedFiles } = require("./ignore-patterns");
 
 const isWindows = process.platform === "win32";
 
@@ -85,30 +86,6 @@ const LANGUAGE_CONFIG = {
   }
 };
 
-const IGNORE_PATTERNS = [
-  "**/node_modules/**",
-  "**/build/**",
-  "**/dist/**",
-  "**/target/**",
-  "**/.venv/**",
-  "**/venv/**",
-  "**/env/**",
-  "**/__pycache__/**",
-  "**/.eggs/**",
-  "**/*.egg-info/**",
-  "**/.git/**",
-  "**/bin/**",           // C# build output
-  "**/obj/**",           // C# intermediate files
-  "**/.vs/**",           // Visual Studio cache
-  "**/packages/**",      // NuGet packages
-  "**/vendor/**",        // Go vendor / PHP Composer dependencies
-  "**/.sfdx/**",         // Salesforce DX cache
-  "**/.localdevserver/**", // Salesforce local dev
-  "**/storage/**",       // Laravel storage
-  "**/bootstrap/cache/**", // Laravel cache
-  "**/My Project/**"     // VB.NET auto-generated
-];
-
 // ----------------------------
 // Detect languages in repository
 // ----------------------------
@@ -117,7 +94,13 @@ function detectLanguages(repoPath, verbose = false) {
     console.log("\n🔍 Detecting languages in repository...");
   }
 
+  // Always log ignore patterns info
+  logIgnoreInfo(repoPath, verbose);
+
   const detectedLanguages = [];
+
+  // Get ignore patterns from centralized module (supports .repoignore files)
+  const ignorePatterns = getIgnorePatterns(repoPath);
 
   // Sort by priority (if defined) to check TypeScript before JavaScript
   const languageEntries = Object.entries(LANGUAGE_CONFIG).sort((a, b) => {
@@ -136,7 +119,7 @@ function detectLanguages(repoPath, verbose = false) {
     // Check each extension pattern
     for (const pattern of config.extensions) {
       const files = glob.sync(path.join(repoPath, pattern), {
-        ignore: IGNORE_PATTERNS.map(p => path.join(repoPath, p)),
+        ignore: ignorePatterns.map(p => path.join(repoPath, p)),
         nodir: true
       });
 
@@ -145,6 +128,8 @@ function detectLanguages(repoPath, verbose = false) {
         if (verbose) {
           console.log(`   ✓ Found ${files.length} ${pattern} files`);
         }
+        // Always log skipped files for detected languages
+        logSkippedFiles(repoPath, pattern, config.name, verbose);
         break;
       }
     }

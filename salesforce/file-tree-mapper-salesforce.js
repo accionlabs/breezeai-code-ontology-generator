@@ -11,6 +11,7 @@ const Parser = require("tree-sitter");
 const apex = require("tree-sitter-sfapex");
 const { extractFunctionsAndCalls, extractReferences } = require("./extract-functions-salesforce");
 const { extractClasses } = require("./extract-classes-salesforce");
+const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // Wrapper function to analyze Salesforce Apex repository
 function analyzeSalesforceRepo(repoPath, opts = {}) {
@@ -42,14 +43,10 @@ function getNodeText(node, sourceText) {
 // -------------------------------------------------------------
 // Step 1: Get Apex files
 // -------------------------------------------------------------
-function getApexFiles(repoPath) {
+function getApexFiles(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
   return glob.sync(`${repoPath}/**/*.{cls,trigger}`, {
-    ignore: [
-      `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/build/**`,
-      `${repoPath}/**/dist/**`,
-      `${repoPath}/**/.sfdx/**`
-    ],
+    ignore: patterns,
   });
 }
 

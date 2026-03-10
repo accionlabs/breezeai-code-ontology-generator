@@ -12,7 +12,8 @@
       "Bash(npm install:*)",
       "Bash(npm rebuild:*)",
       "Bash(node:*)",
-      "Bash(npm ls:*)"
+      "Bash(npm ls:*)",
+      "Bash(ls:*)"
     ]
   }
 }

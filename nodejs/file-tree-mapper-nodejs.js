@@ -14,6 +14,7 @@ const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
 const { extractFuncitonAndItsCalls } = require("./extract-functions-nodejs");
 const { extractClasses } = require("./extract-classes-nodejs");
+const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // -------------------------------------------------------------
 // Initialize parser
@@ -103,13 +104,10 @@ function buildPackageMapper(repoPath) {
   return mapper;
 }
 
-function getJsFiles(repoPath) {
+function getJsFiles(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
   return glob.sync(`${repoPath}/**/*.{js,jsx}`, {
-    ignore: [
-      `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/build/**`,
-      `${repoPath}/**/dist/**`
-    ],
+    ignore: patterns,
   });
 }
 

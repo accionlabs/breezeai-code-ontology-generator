@@ -14,30 +14,25 @@ const glob = require("glob");
 const { extractFunctionsAndCalls, extractImports: extractImportsTS } = require("./extract-functions-typescript");
 const { extractClasses } = require("./extract-classes-typescript");
 const { loadPathAliases, resolveWithAlias } = require("./resolve-path-aliases");
+const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // -------------------------------------------------------------
 // Get TypeScript files only
 // -------------------------------------------------------------
-function getTsFilesOnly(repoPath) {
+function getTsFilesOnly(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
   return glob.sync(`${repoPath}/**/*.{ts,tsx}`, {
-    ignore: [
-      `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/build/**`,
-      `${repoPath}/**/dist/**`
-    ]
+    ignore: patterns
   });
 }
 
 // -------------------------------------------------------------
 // Get JavaScript files only
 // -------------------------------------------------------------
-function getJsFilesOnly(repoPath) {
+function getJsFilesOnly(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
   return glob.sync(`${repoPath}/**/*.{js,jsx}`, {
-    ignore: [
-      `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/build/**`,
-      `${repoPath}/**/dist/**`
-    ]
+    ignore: patterns
   });
 }
 

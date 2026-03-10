@@ -12,23 +12,15 @@ const path = require("path");
 const glob = require("glob");
 const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-python");
 const { extractClasses } = require("./extract-classes-python");
+const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // -------------------------------------------------------------
 // Get Python files
 // -------------------------------------------------------------
-function getPythonFiles(repoPath) {
+function getPythonFiles(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
   return glob.sync(`${repoPath}/**/*.py`, {
-    ignore: [
-      `${repoPath}/**/venv/**`,
-      `${repoPath}/**/.venv/**`,
-      `${repoPath}/**/env/**`,
-      `${repoPath}/**/__pycache__/**`,
-      `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/build/**`,
-      `${repoPath}/**/dist/**`,
-      `${repoPath}/**/.eggs/**`,
-      `${repoPath}/**/*.egg-info/**`
-    ]
+    ignore: patterns
   });
 }
 

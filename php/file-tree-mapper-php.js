@@ -12,24 +12,15 @@ const Parser = require("tree-sitter");
 const PHP = require("tree-sitter-php").php;
 const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-php");
 const { extractClasses } = require("./extract-classes-php");
+const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // -------------------------------------------------------------
 // Get PHP files
 // -------------------------------------------------------------
-function getPHPFiles(repoPath) {
+function getPHPFiles(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
   return glob.sync(`${repoPath}/**/*.php`, {
-    ignore: [
-      `${repoPath}/**/vendor/**`,           // Composer dependencies
-      `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/storage/**`,          // Laravel storage
-      `${repoPath}/**/bootstrap/cache/**`,  // Laravel cache
-      `${repoPath}/**/cache/**`,
-      `${repoPath}/**/.phpunit.cache/**`,
-      `${repoPath}/**/build/**`,
-      `${repoPath}/**/dist/**`,
-      `${repoPath}/**/_ide_helper*.php`,    // IDE helper files
-      `${repoPath}/**/*.blade.php`          // Blade templates (optional)
-    ]
+    ignore: patterns
   });
 }
 

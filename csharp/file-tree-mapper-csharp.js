@@ -12,23 +12,15 @@ const Parser = require("tree-sitter");
 const CSharp = require("tree-sitter-c-sharp");
 const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-csharp");
 const { extractClasses } = require("./extract-classes-csharp");
+const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // -------------------------------------------------------------
 // Get C# files
 // -------------------------------------------------------------
-function getCSharpFiles(repoPath) {
+function getCSharpFiles(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
   return glob.sync(`${repoPath}/**/*.cs`, {
-    ignore: [
-      `${repoPath}/**/bin/**`,
-      `${repoPath}/**/obj/**`,
-      `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/.vs/**`,
-      `${repoPath}/**/packages/**`,
-      `${repoPath}/**/TestResults/**`,
-      `${repoPath}/**/*.Designer.cs`,
-      `${repoPath}/**/*.g.cs`,
-      `${repoPath}/**/*.g.i.cs`
-    ]
+    ignore: patterns
   });
 }
 
