@@ -2,14 +2,13 @@ const Parser = require("tree-sitter");
 const Go = require("tree-sitter-go");
 const fs = require("fs");
 const path = require("path");
+const { parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(Go);
 
 function extractClasses(filePath, repoPath = null) {
-  const source = fs.readFileSync(filePath, "utf8");
-
-  const parser = new Parser();
-  parser.setLanguage(Go);
-
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const classes = [];
 
@@ -43,6 +42,31 @@ function extractClasses(filePath, repoPath = null) {
   });
 
   return classes;
+}
+
+function extractClassStatements(typeNode, source) {
+  if (!typeNode) return [];
+
+  const statements = [];
+  for (let i = 0; i < typeNode.namedChildCount; i++) {
+    const child = typeNode.namedChild(i);
+    // For struct_type, iterate field_declaration_list children
+    // For interface_type, iterate method_spec_list children
+    if (child.type === "field_declaration_list" || child.type === "method_spec_list") {
+      for (let j = 0; j < child.namedChildCount; j++) {
+        const member = child.namedChild(j);
+        const nameNode = member.childForFieldName("name");
+        statements.push({
+          type: member.type,
+          name: nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null,
+          text: source.slice(member.startIndex, member.endIndex),
+          startLine: member.startPosition.row + 1,
+          endLine: member.endPosition.row + 1,
+        });
+      }
+    }
+  }
+  return statements;
 }
 
 function traverse(node, cb) {
@@ -86,6 +110,8 @@ function extractClassInfo(typeSpec, filePath, repoPath = null, source) {
     return null;
   }
 
+  const statements = extractClassStatements(typeNode, source);
+
   return {
     name,
     type,
@@ -95,6 +121,7 @@ function extractClassInfo(typeSpec, filePath, repoPath = null, source) {
     implements: interfaces,
     constructorParams,
     methods,
+    statements,
     startLine,
     endLine
   };

@@ -5,7 +5,7 @@ const path = require("path");
 const glob = require("glob");
 const Parser = require("tree-sitter");
 const Go = require("tree-sitter-go");
-const { extractFunctionsAndCalls } = require("./extract-functions-golang");
+const { extractFunctionsAndCalls, extractImports: extractImportsGo } = require("./extract-functions-golang");
 const { extractClasses } = require("./extract-classes-golang");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
@@ -77,7 +77,7 @@ function extractImports(filePath) {
 // -------------------------------------------------------------
 function analyzeImports(repoPath, opts = {}) {
   const goFiles = getGoFiles(repoPath);
-  const results = [];
+  const results = opts.onResult ? null : [];
   const totalFiles = goFiles.length;
 
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -96,7 +96,7 @@ function analyzeImports(repoPath, opts = {}) {
       process.stdout.write(`\r${spinner} Processing Go: ${i}/${totalFiles} (${percentage}%) - ${fileName.substring(0, 60).padEnd(60, ' ')}`);
       spinnerIndex++;
 
-      const imports = extractImports(file);
+      const imports = extractImportsGo(file);
       const importFiles = [];
       const externalImports = [];
 
@@ -109,7 +109,8 @@ function analyzeImports(repoPath, opts = {}) {
         moduleName = readModuleName(goModPath);
       }
 
-      for (let imp of imports) {
+      for (let impObj of imports) {
+        const imp = impObj.source;
         let resolved = false;
 
         // Local module import
@@ -145,16 +146,21 @@ function analyzeImports(repoPath, opts = {}) {
         }
       }
 
-      const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode);
+      const functions = extractFunctionsAndCalls(file, repoPath, imports, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
-      results.push({
+      const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions,
         classes,
-      });
+      };
+      if (opts.onResult) {
+        opts.onResult(fileResult);
+      } else {
+        results.push(fileResult);
+      }
     } catch (e) {
       console.log(`\n❌ Error analyzing ${file}:`, e);
     }
@@ -162,9 +168,9 @@ function analyzeImports(repoPath, opts = {}) {
 
   // Clear the progress line and show completion
   process.stdout.write(`\r${' '.repeat(120)}\r`);
-  console.log(`✅ Processed ${results.length}/${totalFiles} Go files\n`);
+  console.log(`✅ Processed ${totalFiles} Go files\n`);
 
-  return results;
+  return results || [];
 }
 
 // -------------------------------------------------------------

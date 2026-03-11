@@ -2,13 +2,13 @@ const Parser = require("tree-sitter");
 const Python = require("tree-sitter-python");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode } = require("../utils");
+const { truncateSourceCode, parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(Python);
 
 function extractFunctionsWithCalls(filePath, repoPath, captureSourceCode = false) {
-  const source = fs.readFileSync(filePath, "utf8");
-  const parser = new Parser();
-  parser.setLanguage(Python);
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const functions = [];
 
@@ -52,6 +52,8 @@ function extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode
     parent = parent.parent;
   }
 
+  const statements = extractStatements(node, source);
+
   const result = {
     name,
     type: node.type,
@@ -60,7 +62,8 @@ function extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode
     params,
     startLine,
     endLine,
-    calls
+    calls,
+    statements
   };
 
   if (captureSourceCode && source) {
@@ -161,10 +164,7 @@ function extractDirectCalls(funcNode, source) {
 }
 
 function extractImports(filePath) {
-  const source = fs.readFileSync(filePath, "utf8");
-  const parser = new Parser();
-  parser.setLanguage(Python);
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const imports = [];
 
@@ -242,6 +242,42 @@ function extractImports(filePath) {
   return imports;
 }
 
+function extractStatements(node, source) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    if (child.type !== "lexical_declaration") continue;
+    statements.push({
+      type: child.type,
+      text: source.slice(child.startIndex, child.endIndex),
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
+}
+
+function extractStatements(node, source) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    if (child.type !== "lexical_declaration") continue;
+    statements.push({
+      type: child.type,
+      text: source.slice(child.startIndex, child.endIndex),
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
+}
+
 function traverse(node, cb) {
   cb(node);
   for (let i = 0; i < node.childCount; i++) {
@@ -249,10 +285,10 @@ function traverse(node, cb) {
   }
 }
 
-function extractFunctionsAndCalls(filePath, repoPath, captureSourceCode = false) {
+function extractFunctionsAndCalls(filePath, repoPath, imports = null, captureSourceCode = false) {
   try {
     const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
-    const imports = extractImports(filePath);
+    if (!imports) imports = extractImports(filePath);
 
     const functionMap = new Map();
 

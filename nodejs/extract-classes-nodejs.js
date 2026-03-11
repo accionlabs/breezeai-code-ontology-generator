@@ -3,14 +3,13 @@ const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
 const fs = require("fs");
 const path = require("path");
+const { parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(JavaScript);
 
 function extractClasses(filePath, repoPath = null) {
-  const source = fs.readFileSync(filePath, "utf8");
-
-  const parser = new Parser();
-  parser.setLanguage(JavaScript);
-
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const classes = [];
 
@@ -23,6 +22,25 @@ function extractClasses(filePath, repoPath = null) {
   });
 
   return classes;
+}
+
+function extractClassStatements(node) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    const nameNode = child.childForFieldName("name");
+    statements.push({
+      type: child.type,
+      name: nameNode ? nameNode.text : null,
+      text: child.text,
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
 }
 
 function traverse(node, cb, parent = null) {
@@ -54,6 +72,8 @@ function extractClassInfo(node, filePath, repoPath = null) {
 
 //    const relativePath = repoPath ? path.relative(repoPath, filePath) : filePath;
 
+  const statements = extractClassStatements(node);
+
   return {
     name,
     type: "class", // JavaScript only has classes, not interfaces
@@ -63,6 +83,7 @@ function extractClassInfo(node, filePath, repoPath = null) {
     implements: [], // JavaScript doesn't have implements keyword
     constructorParams,
     methods: methodNames,
+    statements,
     startLine,
     endLine
     // path: relativePath

@@ -74,7 +74,7 @@ function resolveImportPath(importSource, currentFilePath, repoPath) {
 // -------------------------------------------------------------
 function analyzeFiles(repoPath, opts = {}) {
   const pyFiles = getPythonFiles(repoPath);
-  const results = [];
+  const results = opts.onResult ? null : [];
   const totalFiles = pyFiles.length;
 
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -114,16 +114,21 @@ function analyzeFiles(repoPath, opts = {}) {
       });
 
       // Extract functions and classes
-      const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode);
+      const functions = extractFunctionsAndCalls(file, repoPath, imports, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
-      results.push({
+      const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions,
         classes
-      });
+      };
+      if (opts.onResult) {
+        opts.onResult(fileResult);
+      } else {
+        results.push(fileResult);
+      }
     } catch (e) {
       process.stdout.write('\n');
       console.log(`❌ Error analyzing file: ${file} - ${e.message}`);
@@ -133,7 +138,7 @@ function analyzeFiles(repoPath, opts = {}) {
   process.stdout.write('\r' + ' '.repeat(150) + '\r');
   console.log(`✅ Completed processing ${totalFiles} files\n`);
 
-  return results;
+  return results || [];
 }
 
 // -------------------------------------------------------------
@@ -144,8 +149,10 @@ function analyzePythonRepo(repoPath, opts = {}) {
 
   const analysis = analyzeFiles(repoPath, opts);
 
-  console.log(`\n📊 Summary:`);
-  console.log(`   Python files: ${analysis.length}`);
+  if (!opts.onResult) {
+    console.log(`\n📊 Summary:`);
+    console.log(`   Python files: ${analysis.length}`);
+  }
 
   return analysis;
 }

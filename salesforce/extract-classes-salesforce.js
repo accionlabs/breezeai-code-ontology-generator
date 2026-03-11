@@ -2,14 +2,13 @@ const Parser = require("tree-sitter");
 const Apex = require("tree-sitter-sfapex");
 const fs = require("fs");
 const path = require("path");
+const { parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(Apex.apex);
 
 function extractClasses(filePath, repoPath = null) {
-  const source = fs.readFileSync(filePath, "utf8");
-
-  const parser = new Parser();
-  parser.setLanguage(Apex.apex);
-
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const classes = [];
 
@@ -23,6 +22,25 @@ function extractClasses(filePath, repoPath = null) {
   });
 
   return classes;
+}
+
+function extractClassStatements(node, source) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    const nameNode = child.childForFieldName("name");
+    statements.push({
+      type: child.type,
+      name: nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null,
+      text: source.slice(child.startIndex, child.endIndex),
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
 }
 
 function traverse(node, cb) {
@@ -48,6 +66,8 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
 
   const { visibility, isAbstract } = getClassModifiers(node, source);
 
+  const statements = extractClassStatements(node, source);
+
   return {
     name,
     type: isInterface ? "interface" : "class",
@@ -57,6 +77,7 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
     implements: interfaces,
     constructorParams,
     methods,
+    statements,
     startLine,
     endLine
   };

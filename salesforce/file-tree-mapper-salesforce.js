@@ -194,7 +194,7 @@ function analyzeApexFiles(repoPath, classIndex, opts = {}) {
   console.log("Started analyzing Apex files...");
   const apexFiles = getApexFiles(repoPath);
 
-  const results = [];
+  const results = opts.onResult ? null : [];
   const totalFiles = apexFiles.length;
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let spinnerIndex = 0;
@@ -258,16 +258,21 @@ function analyzeApexFiles(repoPath, classIndex, opts = {}) {
       }
 
       // Extract functions and classes
-      const functions = extractFunctionsAndCalls(file, repoPath, classIndex, opts.captureSourceCode);
+      const functions = extractFunctionsAndCalls(file, repoPath, classIndex, references, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
-      results.push({
+      const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions: functions,
         classes
-      });
+      };
+      if (opts.onResult) {
+        opts.onResult(fileResult);
+      } else {
+        results.push(fileResult);
+      }
     } catch (e) {
       process.stdout.write('\n');
       console.log(`❌ Error analyzing file: ${file} - ${e.message}`);
@@ -278,7 +283,7 @@ function analyzeApexFiles(repoPath, classIndex, opts = {}) {
   process.stdout.write('\r' + ' '.repeat(150) + '\r');
   console.log(`✅ Completed processing ${totalFiles} files\n`);
 
-  return results;
+  return results || [];
 }
 
 // -------------------------------------------------------------

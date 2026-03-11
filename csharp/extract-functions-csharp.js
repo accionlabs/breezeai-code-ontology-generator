@@ -2,15 +2,13 @@ const Parser = require("tree-sitter");
 const CSharp = require("tree-sitter-c-sharp");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode } = require("../utils");
+const { truncateSourceCode, parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(CSharp);
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false) {
-  const source = fs.readFileSync(filePath, "utf8");
-
-  const parser = new Parser();
-  parser.setLanguage(CSharp);
-
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const functions = [];
 
@@ -40,6 +38,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
 
   const { visibility, kind } = getFunctionModifiers(node, source);
 
+  const statements = extractStatements(node, source);
+
   const result = {
     name,
     type: getFunctionType(node),
@@ -48,7 +48,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
     params,
     startLine,
     endLine,
-    calls
+    calls,
+    statements
   };
 
   if (captureSourceCode && source) {
@@ -205,6 +206,24 @@ function extractCallInfo(node, source) {
   return null;
 }
 
+function extractStatements(node, source) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    if (child.type !== "lexical_declaration") continue;
+    statements.push({
+      type: child.type,
+      text: source.slice(child.startIndex, child.endIndex),
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
+} 2
+
 function traverse(node, cb) {
   cb(node);
   for (let i = 0; i < node.childCount; i++) {
@@ -214,10 +233,7 @@ function traverse(node, cb) {
 
 // Extract using directives (imports) from a file
 function extractImports(filePath) {
-  const source = fs.readFileSync(filePath, "utf8");
-  const parser = new Parser();
-  parser.setLanguage(CSharp);
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const imports = {
     importFiles: [],

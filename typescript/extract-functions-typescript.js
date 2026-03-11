@@ -2,15 +2,14 @@ const Parser = require("tree-sitter");
 const TS = require("tree-sitter-typescript").typescript;
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode } = require("../utils");
+const { truncateSourceCode, parseSource } = require("../utils");
+
+// Reuse a single parser instance across all files to reduce CPU/memory overhead
+const sharedParser = new Parser();
+sharedParser.setLanguage(TS);
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false) {
-  const source = fs.readFileSync(filePath, "utf8");
-
-  const parser = new Parser();
-  parser.setLanguage(TS);
-
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const functions = [];
 
@@ -42,6 +41,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
 
   const { visibility, kind } = getFunctionModifiers(node, source);
 
+  const statements = extractStatements(node, source);
+
   const result = {
     name,
     type: node.type,
@@ -50,7 +51,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
     params,
     startLine,
     endLine,
-    calls
+    calls,
+    statements
   };
 
   if (captureSourceCode && source) {
@@ -275,6 +277,24 @@ function extractDirectCalls(funcNode, source) {
   return calls;
 }
 
+function extractStatements(node, source) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    if (child.type !== "lexical_declaration") continue;
+    statements.push({
+      type: child.type,
+      text: source.slice(child.startIndex, child.endIndex),
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
+}
+
 function traverse(node, cb) {
   cb(node);
   for (let i = 0; i < node.childCount; i++) {
@@ -283,10 +303,7 @@ function traverse(node, cb) {
 }
 
 function extractImports(filePath) {
-  const source = fs.readFileSync(filePath, "utf8");
-  const parser = new Parser();
-  parser.setLanguage(TS);
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const imports = [];
 
@@ -387,10 +404,10 @@ function resolveImportPath(importSource, currentFilePath, repoPath) {
   return null;
 }
 
-function extractFunctionsAndCalls(filePath, repoPath, captureSourceCode = false) {
+function extractFunctionsAndCalls(filePath, repoPath, imports = null, captureSourceCode = false) {
   try {
     const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
-    const imports = extractImports(filePath);
+    if (!imports) imports = extractImports(filePath);
 
     const functionMap = new Map();
 
