@@ -31,7 +31,7 @@ try {
 // Get VB.NET files
 // -------------------------------------------------------------
 function getVBNetFiles(repoPath, ignorePatterns = null) {
-  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'vbnet' });
   return glob.sync(`${repoPath}/**/*.vb`, {
     ignore: patterns,
     nocase: true  // Case-insensitive matching for file patterns

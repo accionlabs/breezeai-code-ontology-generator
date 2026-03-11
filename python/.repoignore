@@ -1,0 +1,38 @@
+################################################
+# PYTHON
+################################################
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Bytecode
+__pycache__/
+
+# Packaging
+.eggs/
+*.egg-info
+site-packages/
+
+# Testing
+.tox/
+.mypy_cache/
+.pytest_cache/
+
+# Build output
+dist/
+build/
+
+# Compiled files
+*.pyc
+*.pyo
+*.egg
+
+# Config
+setup.cfg
+pip-log.txt
+
+# Generated protobuf
+*_pb2.py

@@ -1,0 +1,20 @@
+################################################
+# PHP
+################################################
+
+# Composer dependencies (root level only, not resources/views/vendor/)
+/vendor/
+
+# Laravel/Framework cache
+storage/framework/
+bootstrap/cache/
+
+# Public assets
+public/assets/vendor/
+public/build/
+
+# Lock files
+composer.lock
+
+# Autoloaders
+autoload_*.php

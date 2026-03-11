@@ -19,7 +19,7 @@ const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 // Get C# files
 // -------------------------------------------------------------
 function getCSharpFiles(repoPath, ignorePatterns = null) {
-  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'csharp' });
   return glob.sync(`${repoPath}/**/*.cs`, {
     ignore: patterns
   });

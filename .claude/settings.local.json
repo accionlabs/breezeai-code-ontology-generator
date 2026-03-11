@@ -18,7 +18,8 @@
       "Bash(node --check java/extract-functions-java.js 2>&1 && echo \"OK\" || echo \"FAIL\")",
       "Bash(node:*)",
       "Bash(npm ls:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(xargs:*)"
     ]
   }
 }

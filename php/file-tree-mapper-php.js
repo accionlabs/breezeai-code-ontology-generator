@@ -19,7 +19,7 @@ const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 // Get PHP files
 // -------------------------------------------------------------
 function getPHPFiles(repoPath, ignorePatterns = null) {
-  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'php' });
   return glob.sync(`${repoPath}/**/*.php`, {
     ignore: patterns
   });

@@ -105,7 +105,7 @@ function buildPackageMapper(repoPath) {
 }
 
 function getJsFiles(repoPath, ignorePatterns = null) {
-  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath);
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'nodejs' });
   return glob.sync(`${repoPath}/**/*.{js,jsx}`, {
     ignore: patterns,
   });

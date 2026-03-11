@@ -14,6 +14,19 @@ const patternCache = new Map();
 // Path to the tool's built-in .repoignore file
 const TOOL_REPOIGNORE_PATH = path.join(__dirname, ".repoignore");
 
+// Language-specific folders containing .repoignore files
+const LANGUAGE_FOLDERS = [
+  "csharp",
+  "golang",
+  "java",
+  "nodejs",
+  "php",
+  "python",
+  "salesforce",
+  "typescript",
+  "vbnet"
+];
+
 /**
  * Convert a single .repoignore pattern to glob format
  * @param {string} pattern - Raw pattern from .repoignore
@@ -41,21 +54,21 @@ function convertToGlobPattern(pattern) {
     return pattern;
   }
 
-  // Directory pattern ending with /
-  if (pattern.endsWith("/")) {
-    // node_modules/ -> **/node_modules/**
-    const dirName = pattern.slice(0, -1);
-    return `**/${dirName}/**`;
-  }
-
-  // Pattern starting with / (root-relative)
+  // Pattern starting with / (root-relative) - check BEFORE directory pattern
   if (pattern.startsWith("/")) {
-    // /bin/ -> bin/**
+    // /vendor/ -> vendor/** (root level only, won't match resources/views/vendor/)
     const stripped = pattern.slice(1);
     if (stripped.endsWith("/")) {
       return stripped + "**";
     }
     return stripped;
+  }
+
+  // Directory pattern ending with / (matches anywhere)
+  if (pattern.endsWith("/")) {
+    // node_modules/ -> **/node_modules/**
+    const dirName = pattern.slice(0, -1);
+    return `**/${dirName}/**`;
   }
 
   // Pattern with directory path (e.g., force-app/**/staticresources/)
@@ -113,24 +126,62 @@ function parseRepoIgnoreFile(filePath) {
 }
 
 /**
+ * Parse .repoignore file for a specific language folder
+ * @param {string} basePath - Base path where language folders are located
+ * @param {string} language - Language folder name (e.g., 'php', 'csharp')
+ * @returns {string[]} - Array of glob-compatible patterns for that language
+ */
+function parseLanguageFolderIgnores(basePath, language) {
+  if (!language || !LANGUAGE_FOLDERS.includes(language)) {
+    return [];
+  }
+
+  const repoIgnorePath = path.join(basePath, language, ".repoignore");
+  if (fs.existsSync(repoIgnorePath)) {
+    return parseRepoIgnoreFile(repoIgnorePath);
+  }
+
+  return [];
+}
+
+/**
+ * Get count of language-specific patterns (for logging)
+ * @param {string} basePath - Base path where language folders are located
+ * @param {string} language - Language folder name (e.g., 'php', 'csharp')
+ * @returns {number} - Count of patterns for that language
+ */
+function countLanguagePatterns(basePath, language) {
+  return parseLanguageFolderIgnores(basePath, language).length;
+}
+
+/**
  * Get ignore patterns for a repository (without repoPath prefix)
  * These patterns can be used with glob's cwd option
  * @param {string} repoPath - Target repository path
  * @param {Object} options - Configuration options
  * @param {boolean} options.includeBuiltin - Include tool's built-in patterns (default: true)
  * @param {boolean} options.includeRepoIgnore - Check for repo's .repoignore (default: true)
+ * @param {string} options.language - Language folder name (e.g., 'php', 'csharp') for language-specific patterns
  * @returns {string[]} - Array of glob patterns
  */
 function getIgnorePatterns(repoPath, options = {}) {
-  const { includeBuiltin = true, includeRepoIgnore = true } = options;
+  const { includeBuiltin = true, includeRepoIgnore = true, language = null } = options;
 
   const allPatterns = new Set();
 
-  // 1. Load tool's built-in patterns
+  // 1. Load tool's built-in common patterns
   if (includeBuiltin) {
     const builtinPatterns = parseRepoIgnoreFile(TOOL_REPOIGNORE_PATH);
     for (const p of builtinPatterns) {
       allPatterns.add(p);
+    }
+
+    // 1b. Load language-specific patterns (only for the specified language)
+    if (language) {
+      const languagePatterns = parseLanguageFolderIgnores(__dirname, language);
+      for (const p of languagePatterns) {
+        allPatterns.add(p);
+      }
     }
   }
 
@@ -216,14 +267,18 @@ function findSkippedFiles(repoPath, filePattern, options = {}) {
  * Log information about ignore patterns and skipped files
  * @param {string} repoPath - Target repository path
  * @param {boolean} verbose - Whether to show detailed output
+ * @param {string} language - Language folder name (e.g., 'php', 'csharp')
  */
-function logIgnoreInfo(repoPath, verbose = false) {
-  const patterns = getIgnorePatterns(repoPath);
+function logIgnoreInfo(repoPath, verbose = false, language = null) {
+  const patterns = getIgnorePatterns(repoPath, { language });
   const repoIgnorePath = path.join(repoPath, ".repoignore");
   const hasRepoIgnore = fs.existsSync(repoIgnorePath);
 
   console.log("\n📋 Ignore Patterns Configuration:");
-  console.log(`   Built-in patterns: ${parseRepoIgnoreFile(TOOL_REPOIGNORE_PATH).length}`);
+  console.log(`   Built-in common patterns: ${parseRepoIgnoreFile(TOOL_REPOIGNORE_PATH).length}`);
+  if (language) {
+    console.log(`   Language patterns (${language}): ${countLanguagePatterns(__dirname, language)}`);
+  }
 
   if (hasRepoIgnore) {
     const repoPatterns = parseRepoIgnoreFile(repoIgnorePath);
@@ -248,17 +303,19 @@ function logIgnoreInfo(repoPath, verbose = false) {
  * Log skipped files for a specific file type
  * @param {string} repoPath - Target repository path
  * @param {string} filePattern - Glob pattern (e.g., "**\/*.js")
- * @param {string} language - Language name for display
+ * @param {string} languageName - Language name for display
  * @param {boolean} verbose - Whether to show all skipped files
+ * @param {string} languageKey - Language folder key for language-specific patterns (e.g., 'typescript', 'python')
  */
-function logSkippedFiles(repoPath, filePattern, language, verbose = false) {
+function logSkippedFiles(repoPath, filePattern, languageName, verbose = false, languageKey = null) {
   const { allFiles, filteredFiles, skippedFiles, skippedCount } = findSkippedFiles(
     repoPath,
-    filePattern
+    filePattern,
+    { language: languageKey }
   );
 
   if (skippedCount > 0) {
-    console.log(`\n⏭️  Skipped ${skippedCount} ${language} files (matched ignore patterns):`);
+    console.log(`\n⏭️  Skipped ${skippedCount} ${languageName} files (matched ignore patterns):`);
 
     if (verbose) {
       // Show all skipped files in verbose mode
@@ -287,6 +344,7 @@ module.exports = {
   getIgnorePatterns,
   getIgnorePatternsWithPrefix,
   parseRepoIgnoreFile,
+  parseLanguageFolderIgnores,
   convertToGlobPattern,
   clearCache,
   getToolRepoIgnorePath,
