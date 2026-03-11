@@ -52,6 +52,8 @@ function extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode
     parent = parent.parent;
   }
 
+  const statements = extractStatements(node, source);
+
   const result = {
     name,
     type: node.type,
@@ -60,7 +62,8 @@ function extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode
     params,
     startLine,
     endLine,
-    calls
+    calls,
+    statements
   };
 
   if (captureSourceCode && source) {
@@ -237,6 +240,42 @@ function extractImports(filePath) {
   });
 
   return imports;
+}
+
+function extractStatements(node, source) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    if (child.type !== "lexical_declaration") continue;
+    statements.push({
+      type: child.type,
+      text: source.slice(child.startIndex, child.endIndex),
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
+}
+
+function extractStatements(node, source) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    if (child.type !== "lexical_declaration") continue;
+    statements.push({
+      type: child.type,
+      text: source.slice(child.startIndex, child.endIndex),
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
 }
 
 function traverse(node, cb) {

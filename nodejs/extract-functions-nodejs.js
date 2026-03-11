@@ -42,6 +42,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source = null, cap
 
   // const relativePath = repoPath ? path.relative(repoPath, filePath) : filePath;
 
+  const statements = extractStatements(node, source);
+
   const result = {
     name,
     type: node.type,
@@ -51,7 +53,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source = null, cap
     startLine,
     endLine,
     // path: relativePath,
-    calls
+    calls,
+    statements
   };
 
   if (captureSourceCode && source) {
@@ -253,6 +256,24 @@ function extractDirectCalls(funcNode) {
 
 
 // ---------------------------------------------------------
+function extractStatements(node, source) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    if (child.type !== "lexical_declaration") continue;
+    statements.push({
+      type: child.type,
+      text: source ? source.slice(child.startIndex, child.endIndex) : child.text,
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
+}
+
 function traverse(node, cb, parent = null) {
   cb(node, parent);
   for (let i = 0; i < node.childCount; i++) {

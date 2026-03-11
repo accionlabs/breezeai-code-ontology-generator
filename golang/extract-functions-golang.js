@@ -57,6 +57,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
 
   const { visibility, kind, receiver } = getFunctionModifiers(node, source);
 
+  const statements = extractStatements(node, source);
+
   const result = {
     name,
     type: node.type,
@@ -66,7 +68,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
     params,
     startLine,
     endLine,
-    calls
+    calls,
+    statements
   };
 
   if (captureSourceCode && source) {
@@ -196,6 +199,24 @@ function extractDirectCalls(funcNode, source) {
   });
 
   return calls;
+}
+
+function extractStatements(node, source) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    if (child.type !== "lexical_declaration") continue;
+    statements.push({
+      type: child.type,
+      text: source.slice(child.startIndex, child.endIndex),
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
 }
 
 function traverse(node, cb) {

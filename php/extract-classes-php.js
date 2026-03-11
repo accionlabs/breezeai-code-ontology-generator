@@ -33,6 +33,34 @@ function extractClasses(filePath, repoPath = null) {
   }
 }
 
+function extractClassStatements(node, source) {
+  let body = node.childForFieldName("body");
+  if (!body) {
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i);
+      if (child.type === "declaration_list") {
+        body = child;
+        break;
+      }
+    }
+  }
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    const nameNode = child.childForFieldName("name");
+    statements.push({
+      type: child.type,
+      name: nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null,
+      text: source.slice(child.startIndex, child.endIndex),
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
+}
+
 function traverse(node, cb) {
   cb(node);
   for (let i = 0; i < node.childCount; i++) {
@@ -55,6 +83,8 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
 
   const { visibility, isAbstract, isFinal } = getClassModifiers(node, source);
 
+  const statements = extractClassStatements(node, source);
+
   return {
     name,
     type: typeKind,
@@ -64,6 +94,7 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
     implements: interfaces,
     constructorParams,
     methods,
+    statements,
     startLine,
     endLine
   };

@@ -44,6 +44,31 @@ function extractClasses(filePath, repoPath = null) {
   return classes;
 }
 
+function extractClassStatements(typeNode, source) {
+  if (!typeNode) return [];
+
+  const statements = [];
+  for (let i = 0; i < typeNode.namedChildCount; i++) {
+    const child = typeNode.namedChild(i);
+    // For struct_type, iterate field_declaration_list children
+    // For interface_type, iterate method_spec_list children
+    if (child.type === "field_declaration_list" || child.type === "method_spec_list") {
+      for (let j = 0; j < child.namedChildCount; j++) {
+        const member = child.namedChild(j);
+        const nameNode = member.childForFieldName("name");
+        statements.push({
+          type: member.type,
+          name: nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null,
+          text: source.slice(member.startIndex, member.endIndex),
+          startLine: member.startPosition.row + 1,
+          endLine: member.endPosition.row + 1,
+        });
+      }
+    }
+  }
+  return statements;
+}
+
 function traverse(node, cb) {
   cb(node);
   for (let i = 0; i < node.childCount; i++) {
@@ -85,6 +110,8 @@ function extractClassInfo(typeSpec, filePath, repoPath = null, source) {
     return null;
   }
 
+  const statements = extractClassStatements(typeNode, source);
+
   return {
     name,
     type,
@@ -94,6 +121,7 @@ function extractClassInfo(typeSpec, filePath, repoPath = null, source) {
     implements: interfaces,
     constructorParams,
     methods,
+    statements,
     startLine,
     endLine
   };

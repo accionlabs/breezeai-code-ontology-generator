@@ -95,6 +95,8 @@ function extractClassInfo(node, source) {
     });
   }
 
+  const statements = extractClassStatements(node, source);
+
   // Match TypeScript format
   return {
     name,
@@ -105,6 +107,7 @@ function extractClassInfo(node, source) {
     implements: [], // Python doesn't have interfaces like TypeScript
     constructorParams,
     methods, // Now array of strings instead of objects
+    statements,
     startLine,
     endLine
   };
@@ -217,6 +220,25 @@ function extractDecoratorName(decoratorNode, source) {
     }
   }
   return "unknown";
+}
+
+function extractClassStatements(node, source) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    const nameNode = child.childForFieldName("name");
+    statements.push({
+      type: child.type,
+      name: nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null,
+      text: source.slice(child.startIndex, child.endIndex),
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
 }
 
 function traverse(node, cb) {
