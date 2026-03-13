@@ -29,12 +29,11 @@ function parseGitHubRepo(repoUrl) {
 }
 
 async function githubApi(endpoint, token) {
-  const res = await fetch(`https://api.github.com${endpoint}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github.v3+json",
-    },
-  });
+  const headers = { Accept: "application/vnd.github.v3+json" };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const res = await fetch(`https://api.github.com${endpoint}`, { headers });
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`GitHub API ${res.status}: ${body}`);
@@ -412,10 +411,10 @@ app.post("/api/analyze-diff", async (req, res) => {
     req.body;
 
   // Validate required fields
-  if (!repoUrl || !incomingCommitId || !gitToken || !gitBranch || !projectUuid || !codeOntologyId) {
+  if (!repoUrl || !incomingCommitId || !gitBranch || !projectUuid || !codeOntologyId) {
     return res.status(400).json({
       error:
-        "All fields required: repoUrl, incomingCommitId, gitToken, gitBranch, projectUuid, codeOntologyId",
+        "All fields required: repoUrl, incomingCommitId, gitBranch, projectUuid, codeOntologyId",
     });
   }
 
