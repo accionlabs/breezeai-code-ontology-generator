@@ -1,0 +1,24 @@
+################################################
+# ASP.NET / C#
+################################################
+
+# Build output directories
+bin/
+obj/
+packages/
+.nuget/
+
+
+# Web asset directories
+wwwroot/assets/global/plugins/
+wwwroot/lib/
+wwwroot/vendor/
+wwwroot/vendors/
+Scripts/bundles/
+
+# Generated/Auto-generated files
+*.designer.cs
+*.generated.cs
+*.AssemblyInfo.cs
+Reference.cs
+*.edmx.diagram

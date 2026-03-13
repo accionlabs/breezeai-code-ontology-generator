@@ -1,0 +1,21 @@
+################################################
+# GO
+################################################
+
+# Dependencies (vendored)
+vendor/
+
+# Module cache
+pkg/mod/
+
+# Build cache
+.cache/go-build/
+
+# Test fixtures
+testdata/
+
+# Generated files
+go.sum
+*_generated.go
+*.pb.go
+*_string.go

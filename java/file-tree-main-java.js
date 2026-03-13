@@ -12,14 +12,16 @@ const path = require("path");
 const fs = require("fs");
 const glob = require("glob");
 const os = require("os");
+const { getIgnorePatterns, getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // ---------- class index ----------
 function buildJavaClassIndex(repoPath) {
   const index = {};
+  const ignorePatterns = getIgnorePatterns(repoPath, { language: 'java' });
 
   const files = glob.sync("**/*.java", {
     cwd: repoPath,
-    ignore: ["**/target/**", "**/build/**", "**/node_modules/**"]
+    ignore: ignorePatterns
   });
 
   for (const file of files) {
@@ -41,9 +43,10 @@ function buildJavaClassIndex(repoPath) {
 function analyzeJavaRepo(repoPath, opts = {}) {
   return new Promise((resolve, reject) => {
     console.log(`📂 Scanning Java repo: ${repoPath}`);
+    const ignorePatterns = getIgnorePatternsWithPrefix(repoPath, { language: 'java' });
 
     const javaFiles = glob.sync(`${repoPath}/**/*.java`, {
-      ignore: ["**/target/**", "**/build/**", "**/node_modules/**"]
+      ignore: ignorePatterns
     });
 
     const classIndex = buildJavaClassIndex(repoPath);
@@ -78,12 +81,18 @@ function analyzeJavaRepo(repoPath, opts = {}) {
       );
 
       worker.on("message", data => {
-        results.push(...data);
+        if (opts.onResult) {
+          data.forEach(item => opts.onResult(item));
+        } else {
+          results.push(...data);
+        }
         done++;
         if (done === totalChunks) {
-          console.log(`\n📊 Summary:`);
-          console.log(`   Java files: ${results.length}`);
-          resolve(results);
+          if (!opts.onResult) {
+            console.log(`\n📊 Summary:`);
+            console.log(`   Java files: ${results.length}`);
+          }
+          resolve(opts.onResult ? [] : results);
         }
       });
 

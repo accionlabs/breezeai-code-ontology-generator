@@ -12,8 +12,9 @@ const path = require("path");
 const glob = require("glob");
 const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
-const { extractFuncitonAndItsCalls } = require("./extract-functions-nodejs");
+const { extractFuncitonAndItsCalls, extractImports: extractImportsJS } = require("./extract-functions-nodejs");
 const { extractClasses } = require("./extract-classes-nodejs");
+const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // -------------------------------------------------------------
 // Initialize parser
@@ -103,13 +104,10 @@ function buildPackageMapper(repoPath) {
   return mapper;
 }
 
-function getJsFiles(repoPath) {
+function getJsFiles(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'nodejs' });
   return glob.sync(`${repoPath}/**/*.{js,jsx}`, {
-    ignore: [
-      `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/build/**`,
-      `${repoPath}/**/dist/**`
-    ],
+    ignore: patterns,
   });
 }
 
@@ -120,7 +118,7 @@ function analyzeImports(repoPath, mapper, opts = {}) {
   const jsFiles = getJsFiles(repoPath)
 
 
-  const results = [];
+  const results = opts.onResult ? null : [];
   const totalFiles = jsFiles.length;
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let spinnerIndex = 0;
@@ -139,7 +137,7 @@ function analyzeImports(repoPath, mapper, opts = {}) {
       process.stdout.write(`\r${spinner} Processing: ${i}/${totalFiles} (${percentage}%) - ${fileName.substring(0, 60).padEnd(60, ' ')}`);
       spinnerIndex++;
 
-      const { imports } = extractImports(file);
+      const imports = extractImportsJS(file);
       const importFiles = [];
       const externalImports = [];
 
@@ -173,7 +171,8 @@ function analyzeImports(repoPath, mapper, opts = {}) {
         return null;
       }
 
-      for (let imp of imports) {
+      for (let impObj of imports) {
+        const imp = impObj.source;
         let resolvedPath = null;
         let isResolved = false;
 
@@ -239,17 +238,22 @@ function analyzeImports(repoPath, mapper, opts = {}) {
       }
 
       // Extract functions for this file
-      const functions = extractFuncitonAndItsCalls(file, repoPath, opts.captureSourceCode);
+      const functions = extractFuncitonAndItsCalls(file, repoPath, imports, opts.captureSourceCode);
 
       const classes = extractClasses(file, repoPath)
 
-      results.push({
+      const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions: functions,
         classes
-      });
+      };
+      if (opts.onResult) {
+        opts.onResult(fileResult);
+      } else {
+        results.push(fileResult);
+      }
     } catch (e) {
       process.stdout.write('\n');
       console.log(`❌ Error analyzing file: ${file} - ${e.message}`);
@@ -260,7 +264,7 @@ function analyzeImports(repoPath, mapper, opts = {}) {
   process.stdout.write('\r' + ' '.repeat(150) + '\r');
   console.log(`✅ Completed processing ${totalFiles} files\n`);
 
-  return results;
+  return results || [];
 }
 
 // -------------------------------------------------------------
@@ -272,8 +276,10 @@ function analyzeJavaScriptRepo(repoPath, opts = {}) {
   const mapper = buildPackageMapper(repoPath);
   const analysis = analyzeImports(repoPath, mapper, opts);
 
-  console.log(`\n📊 Summary:`);
-  console.log(`   JavaScript files: ${analysis.length}`);
+  if (!opts.onResult) {
+    console.log(`\n📊 Summary:`);
+    console.log(`   JavaScript files: ${analysis.length}`);
+  }
 
   return analysis;
 }

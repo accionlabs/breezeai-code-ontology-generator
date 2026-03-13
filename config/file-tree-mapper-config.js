@@ -6,6 +6,7 @@
 const fs = require("fs");
 const path = require("path");
 const glob = require("glob");
+const { getIgnorePatterns } = require("../ignore-patterns");
 
 // Patterns for config files to parse (root level only)
 const CONFIG_PATTERNS = {
@@ -20,22 +21,6 @@ const CONFIG_PATTERNS = {
   gradle: ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"],
   other: [".gitignore", ".dockerignore", "Makefile", "README.md", "README.rst", "LICENSE"]
 };
-
-const IGNORE_PATTERNS = [
-  "**/node_modules/**",
-  "**/build/**",
-  "**/dist/**",
-  "**/target/**",
-  "**/.venv/**",
-  "**/venv/**",
-  "**/env/**",
-  "**/__pycache__/**",
-  "**/.eggs/**",
-  "**/*.egg-info/**",
-  "**/.git/**",
-  "**/output/**",
-  "**/test-output/**"
-];
 
 /**
  * Parse JSON file and extract metadata
@@ -456,11 +441,13 @@ function analyzeConfigRepo(repoPath) {
   for (const [configType, patterns] of Object.entries(CONFIG_PATTERNS)) {
     for (const pattern of patterns) {
       // Use cwd option to search only in the root directory
+      const ignorePatterns = getIgnorePatterns(repoPath);
       const files = glob.sync(pattern, {
         cwd: repoPath,
         absolute: true,
         nodir: true,
-        dot: true // Include dotfiles like .env
+        dot: true, // Include dotfiles like .env
+        ignore: ignorePatterns
       });
 
       for (const file of files) {

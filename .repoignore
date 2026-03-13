@@ -1,0 +1,112 @@
+################################################
+# COMMON DIRECTORIES
+# (Shared across all languages)
+################################################
+
+# Version control
+.git/
+.svn/
+.hg/
+
+# IDE / Editor
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+
+# Common directories
+coverage/
+logs/
+tmp/
+temp/
+.cache/
+.history/
+
+################################################
+# TESTS (OPTIONAL FOR ARCHITECTURE ANALYSIS)
+################################################
+
+tests/
+test/
+__tests__/
+spec/
+specs/
+
+*.test.*
+*.spec.*
+*.snap
+*.coverage
+
+################################################
+# DOCUMENTATION / EXAMPLES
+################################################
+
+docs/
+documentation/
+examples/
+samples/
+demo/
+
+################################################
+# BINARY / STATIC ASSETS
+################################################
+
+fonts/
+
+*.svg
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.ico
+*.woff
+*.woff2
+*.ttf
+*.eot
+*.mp4
+*.mov
+*.avi
+*.mp3
+*.wav
+*.pdf
+
+################################################
+# LARGE DATA / MODELS
+################################################
+
+*.csv
+*.tsv
+*.parquet
+*.h5
+*.onnx
+*.pt
+*.pth
+*.ckpt
+
+################################################
+# ENV / CONFIG SECRETS
+################################################
+
+.env
+.env.*
+*.local
+*.secret
+
+################################################
+# LOG / TEMP FILES
+################################################
+
+*.log
+*.tmp
+*.cache
+*.bak
+*.swp
+*.lock
+
+################################################
+# LANGUAGE-SPECIFIC PATTERNS
+# See .repoignore.d/ folder for language-specific
+# ignore patterns (aspnet, javascript, php, etc.)
+################################################

@@ -2,15 +2,13 @@ const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode } = require("../utils");
+const { truncateSourceCode, parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(JavaScript);
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false) {
-  const source = fs.readFileSync(filePath, "utf8");
-
-  const parser = new Parser();
-  parser.setLanguage(JavaScript);
-
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const functions = [];
 
@@ -44,6 +42,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source = null, cap
 
   // const relativePath = repoPath ? path.relative(repoPath, filePath) : filePath;
 
+  const statements = extractStatements(node, source);
+
   const result = {
     name,
     type: node.type,
@@ -53,7 +53,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source = null, cap
     startLine,
     endLine,
     // path: relativePath,
-    calls
+    calls,
+    statements
   };
 
   if (captureSourceCode && source) {
@@ -255,6 +256,24 @@ function extractDirectCalls(funcNode) {
 
 
 // ---------------------------------------------------------
+function extractStatements(node, source) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    if (child.type !== "lexical_declaration") continue;
+    statements.push({
+      type: child.type,
+      text: source ? source.slice(child.startIndex, child.endIndex) : child.text,
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
+}
+
 function traverse(node, cb, parent = null) {
   cb(node, parent);
   for (let i = 0; i < node.childCount; i++) {
@@ -267,10 +286,7 @@ function traverse(node, cb, parent = null) {
 // Extract imports/requires from a file
 // ---------------------------------------------------------
 function extractImports(filePath) {
-  const source = fs.readFileSync(filePath, "utf8");
-  const parser = new Parser();
-  parser.setLanguage(JavaScript);
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const imports = []; // { source: "./foo", imported: ["bar", "baz"] }
 
@@ -372,10 +388,10 @@ function resolveImportPath(importSource, currentFilePath, repoPath) {
 }
 
 
-function extractFuncitonAndItsCalls(filePath, repoPath, captureSourceCode = false) {
+function extractFuncitonAndItsCalls(filePath, repoPath, imports = null, captureSourceCode = false) {
  try {
       const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
-      const imports = extractImports(filePath);
+      if (!imports) imports = extractImports(filePath);
 
 
       const functionMap = new Map();
@@ -402,4 +418,4 @@ function extractFuncitonAndItsCalls(filePath, repoPath, captureSourceCode = fals
     }
 }
 
-module.exports = { extractFuncitonAndItsCalls };
+module.exports = { extractFuncitonAndItsCalls, extractImports };

@@ -10,6 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const glob = require("glob");
 const { analyzeVBNetFileWithRegex } = require("./regex-parser-vbnet");
+const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // Try to load tree-sitter, but don't fail if it doesn't work
 let Parser, VBNet, treeSitterAvailable = false;
@@ -29,21 +30,10 @@ try {
 // -------------------------------------------------------------
 // Get VB.NET files
 // -------------------------------------------------------------
-function getVBNetFiles(repoPath) {
+function getVBNetFiles(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'vbnet' });
   return glob.sync(`${repoPath}/**/*.vb`, {
-    ignore: [
-      `${repoPath}/**/bin/**`,              // Build output
-      `${repoPath}/**/obj/**`,              // Intermediate files
-      `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/.vs/**`,              // Visual Studio cache
-      `${repoPath}/**/packages/**`,         // NuGet packages
-      `${repoPath}/**/.git/**`,
-      `${repoPath}/**/My Project/**`,       // Auto-generated files
-      `${repoPath}/**/Reference.vb`,        // Service references
-      `${repoPath}/**/*.Designer.vb`,       // Designer files (capital D)
-      `${repoPath}/**/*.designer.vb`,       // Designer files (lowercase d)
-      `${repoPath}/**/AssemblyInfo.vb`      // Assembly info
-    ],
+    ignore: patterns,
     nocase: true  // Case-insensitive matching for file patterns
   });
 }
@@ -254,7 +244,7 @@ function analyzeVBNetRepo(repoPath, opts = {}) {
   const { classIndex, fqcnIndex, methodIndex, functionIndex } = buildClassIndexWithRegex(vbnetFiles, repoPath);
   console.log(`✅ Found ${Object.keys(classIndex).length} types and ${Object.keys(methodIndex).length} methods across ${totalFiles} files\n`);
 
-  const results = [];
+  const results = opts.onResult ? null : [];
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let spinnerIndex = 0;
 
@@ -324,13 +314,18 @@ function analyzeVBNetRepo(repoPath, opts = {}) {
         });
       });
 
-      results.push({
+      const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions: analysis.functions,
         classes: analysis.classes
-      });
+      };
+      if (opts.onResult) {
+        opts.onResult(fileResult);
+      } else {
+        results.push(fileResult);
+      }
     } catch (e) {
       process.stdout.write('\n');
       console.log(`❌ Error analyzing file: ${file} - ${e.message}`);
@@ -340,7 +335,7 @@ function analyzeVBNetRepo(repoPath, opts = {}) {
   process.stdout.write('\r' + ' '.repeat(150) + '\r');
   console.log(`✅ Completed processing ${totalFiles} VB.NET files\n`);
 
-  return results;
+  return results || [];
 }
 
 // -------------------------------------------------------------

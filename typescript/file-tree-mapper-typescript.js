@@ -14,30 +14,25 @@ const glob = require("glob");
 const { extractFunctionsAndCalls, extractImports: extractImportsTS } = require("./extract-functions-typescript");
 const { extractClasses } = require("./extract-classes-typescript");
 const { loadPathAliases, resolveWithAlias } = require("./resolve-path-aliases");
+const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // -------------------------------------------------------------
 // Get TypeScript files only
 // -------------------------------------------------------------
-function getTsFilesOnly(repoPath) {
+function getTsFilesOnly(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'typescript' });
   return glob.sync(`${repoPath}/**/*.{ts,tsx}`, {
-    ignore: [
-      `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/build/**`,
-      `${repoPath}/**/dist/**`
-    ]
+    ignore: patterns
   });
 }
 
 // -------------------------------------------------------------
 // Get JavaScript files only
 // -------------------------------------------------------------
-function getJsFilesOnly(repoPath) {
+function getJsFilesOnly(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'typescript' });
   return glob.sync(`${repoPath}/**/*.{js,jsx}`, {
-    ignore: [
-      `${repoPath}/**/node_modules/**`,
-      `${repoPath}/**/build/**`,
-      `${repoPath}/**/dist/**`
-    ]
+    ignore: patterns
   });
 }
 
@@ -46,7 +41,7 @@ function getJsFilesOnly(repoPath) {
 // -------------------------------------------------------------
 function analyzeTypeScriptFiles(repoPath, pathAliases, opts = {}) {
   const tsFiles = getTsFilesOnly(repoPath);
-  const results = [];
+  const results = opts.onResult ? null : [];
   const totalFiles = tsFiles.length;
 
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -170,16 +165,21 @@ function analyzeTypeScriptFiles(repoPath, pathAliases, opts = {}) {
       }
 
       // Extract functions and classes
-      const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode);
+      const functions = extractFunctionsAndCalls(file, repoPath, imports, opts.captureSourceCode);
       const classes = extractClasses(file, repoPath);
 
-      results.push({
+      const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions,
         classes
-      });
+      };
+      if (opts.onResult) {
+        opts.onResult(fileResult);
+      } else {
+        results.push(fileResult);
+      }
     } catch (e) {
       process.stdout.write('\n');
       console.log(`❌ Error analyzing file: ${file} - ${e.message}`);
@@ -189,7 +189,7 @@ function analyzeTypeScriptFiles(repoPath, pathAliases, opts = {}) {
   process.stdout.write('\r' + ' '.repeat(150) + '\r');
   console.log(`✅ Completed processing ${totalFiles} TypeScript files\n`);
 
-  return results;
+  return results || [];
 }
 
 // -------------------------------------------------------------
@@ -201,8 +201,10 @@ function analyzeTypeScriptRepo(repoPath, opts = {}) {
 
   const tsResults = analyzeTypeScriptFiles(repoPath, pathAliases, opts);
 
-  console.log(`\n📊 Summary:`);
-  console.log(`   TypeScript files: ${tsResults.length}`);
+  if (!opts.onResult) {
+    console.log(`\n📊 Summary:`);
+    console.log(`   TypeScript files: ${tsResults.length}`);
+  }
 
   return tsResults;
 }

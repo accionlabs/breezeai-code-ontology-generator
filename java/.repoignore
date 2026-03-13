@@ -1,0 +1,27 @@
+################################################
+# JAVA / JVM
+################################################
+
+# Maven build
+target/
+
+# Gradle
+.gradle/
+build/
+
+# Maven local cache
+.m2/
+
+# Libraries
+lib/
+
+# Generated sources
+generated-sources/
+generated-test-sources/
+
+# IDE output
+out/
+
+# Compiled files
+*.class
+*.jar

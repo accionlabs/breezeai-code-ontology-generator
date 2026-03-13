@@ -2,15 +2,13 @@ const Parser = require("tree-sitter");
 const Apex = require("tree-sitter-sfapex");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode } = require("../utils");
+const { truncateSourceCode, parseSource } = require("../utils");
+
+const sharedParser = new Parser();
+sharedParser.setLanguage(Apex.apex);
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false) {
-  const source = fs.readFileSync(filePath, "utf8");
-
-  const parser = new Parser();
-  parser.setLanguage(Apex.apex);
-
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const functions = [];
 
@@ -39,6 +37,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
 
   const { visibility, kind } = getFunctionModifiers(node, source);
 
+  const statements = extractStatements(node, source);
+
   const result = {
     name,
     type: node.type === "constructor_declaration" ? "constructor" : "method",
@@ -47,7 +47,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
     params,
     startLine,
     endLine,
-    calls
+    calls,
+    statements
   };
 
   if (captureSourceCode && source) {
@@ -168,6 +169,24 @@ function extractCallInfo(node, source) {
   };
 }
 
+function extractStatements(node, source) {
+  const body = node.childForFieldName("body");
+  if (!body) return [];
+
+  const statements = [];
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    if (child.type !== "lexical_declaration") continue;
+    statements.push({
+      type: child.type,
+      text: source.slice(child.startIndex, child.endIndex),
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
+}
+
 function traverse(node, cb) {
   cb(node);
   for (let i = 0; i < node.childCount; i++) {
@@ -176,10 +195,7 @@ function traverse(node, cb) {
 }
 
 function extractReferences(filePath) {
-  const source = fs.readFileSync(filePath, "utf8");
-  const parser = new Parser();
-  parser.setLanguage(Apex.apex);
-  const tree = parser.parse(source);
+  const { source, tree } = parseSource(filePath, sharedParser);
 
   const references = [];
 
@@ -218,10 +234,10 @@ function resolveReference(reference, currentFilePath, repoPath, classIndex) {
   return null; // External or standard Salesforce class
 }
 
-function extractFunctionsAndCalls(filePath, repoPath, classIndex = {}, captureSourceCode = false) {
+function extractFunctionsAndCalls(filePath, repoPath, classIndex = {}, references = null, captureSourceCode = false) {
   try {
     const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
-    const references = extractReferences(filePath);
+    if (!references) references = extractReferences(filePath);
 
     const functionMap = new Map();
 
