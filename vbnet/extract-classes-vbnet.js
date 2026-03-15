@@ -34,23 +34,13 @@ function extractClasses(filePath, repoPath = null, captureStatements = false) {
   }
 }
 
+const CLASS_STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "enum_statement", "field_declaration"];
+
 function extractClassStatements(node, source) {
   const statements = [];
   for (let i = 0; i < node.namedChildCount; i++) {
     const child = node.namedChild(i);
-    // Skip non-member nodes (keywords, identifiers, etc.)
-    if (
-      child.type === "function_statement" ||
-      child.type === "sub_statement" ||
-      child.type === "property_statement" ||
-      child.type === "operator_statement" ||
-      child.type === "field_declaration" ||
-      child.type === "event_statement" ||
-      child.type === "enum_statement" ||
-      child.type === "class_statement" ||
-      child.type === "structure_statement" ||
-      child.type === "interface_statement"
-    ) {
+    if (CLASS_STATEMENT_TYPES.includes(child.type)) {
       const nameNode = child.childForFieldName("name");
       let name = nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null;
       if (!name) {

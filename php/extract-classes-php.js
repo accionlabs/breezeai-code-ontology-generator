@@ -46,10 +46,11 @@ function extractClassStatements(node, source) {
   }
   if (!body) return [];
 
+  const CLASS_STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "enum_declaration"];
   const statements = [];
   for (let i = 0; i < body.namedChildCount; i++) {
     const child = body.namedChild(i);
-    if (child.type === "comment") continue;
+    if (!CLASS_STATEMENT_TYPES.includes(child.type)) continue;
     const nameNode = child.childForFieldName("name");
     statements.push({
       type: child.type,
