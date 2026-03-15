@@ -44,6 +44,8 @@ function extractClasses(filePath, repoPath = null, captureStatements = false) {
   return classes;
 }
 
+const CLASS_STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "field_declaration"];
+
 function extractClassStatements(typeNode, source) {
   if (!typeNode) return [];
 
@@ -55,7 +57,7 @@ function extractClassStatements(typeNode, source) {
     if (child.type === "field_declaration_list" || child.type === "method_spec_list") {
       for (let j = 0; j < child.namedChildCount; j++) {
         const member = child.namedChild(j);
-        if (member.type === "comment") continue;
+        if (!CLASS_STATEMENT_TYPES.includes(member.type)) continue;
         const nameNode = member.childForFieldName("name");
         statements.push({
           type: member.type,

@@ -222,6 +222,8 @@ function extractDecoratorName(decoratorNode, source) {
   return "unknown";
 }
 
+const CLASS_STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition"];
+
 function extractClassStatements(node, source) {
   const body = node.childForFieldName("body");
   if (!body) return [];
@@ -229,7 +231,7 @@ function extractClassStatements(node, source) {
   const statements = [];
   for (let i = 0; i < body.namedChildCount; i++) {
     const child = body.namedChild(i);
-    if (child.type === "comment") continue;
+    if (!CLASS_STATEMENT_TYPES.includes(child.type)) continue;
     const nameNode = child.childForFieldName("name");
     statements.push({
       type: child.type,
