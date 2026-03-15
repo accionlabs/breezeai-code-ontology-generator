@@ -10,7 +10,7 @@ const path = require("path");
 const glob = require("glob");
 const Parser = require("tree-sitter");
 const PHP = require("tree-sitter-php").php;
-const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-php");
+const { extractFunctionsAndCalls, extractImports, extractFileStatements } = require("./extract-functions-php");
 const { extractClasses } = require("./extract-classes-php");
 const { readSource, parseSource } = require("../utils");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
@@ -506,15 +506,18 @@ function analyzePHPRepo(repoPath, opts = {}) {
         fqcnIndex,
         methodIndex,
         varTypes
-      }, opts.captureSourceCode);
+      }, opts.captureSourceCode, opts.captureStatements);
       const classes = extractClasses(file, repoPath);
+
+      const statements = opts.captureStatements ? extractFileStatements(file) : [];
 
       const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions,
-        classes
+        classes,
+        statements
       };
       if (opts.onResult) {
         opts.onResult(fileResult);
@@ -552,10 +555,11 @@ if (require.main === module) {
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
   const captureSourceCode = process.argv.includes("--capture-source-code");
+  const captureStatements = process.argv.includes("--capture-statements");
 
   console.log(`📂 Scanning PHP repo: ${repoPath}`);
 
-  const results = analyzePHPRepo(repoPath, { captureSourceCode });
+  const results = analyzePHPRepo(repoPath, { captureSourceCode, captureStatements });
 
   console.log(`\n📊 Summary:`);
   console.log(`   Total PHP files: ${results.length}\n`);

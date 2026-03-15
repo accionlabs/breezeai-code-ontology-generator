@@ -71,6 +71,9 @@ async function run(opts) {
     if (opts.captureSourceCode) {
       command += " --capture-source-code";
     }
+    if (opts.captureStatements) {
+      command += " --capture-statements";
+    }
 
     console.log("\n🚀 Running command:");
     console.log(command);

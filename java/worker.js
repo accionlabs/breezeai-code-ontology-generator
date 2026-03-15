@@ -6,24 +6,27 @@ if (isMainThread) {
 }
 const fs = require("fs");
 const path = require("path");
-const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-java");
+const { extractFunctionsAndCalls, extractImports, extractFileStatements } = require("./extract-functions-java");
 const { extractClasses } = require("./extract-classes-java");
 
-const { repoPath, files, classIndex, captureSourceCode } = workerData;
+const { repoPath, files, classIndex, captureSourceCode, captureStatements } = workerData;
 
 // ---------- analyze file using extraction modules ----------
 function analyzeFile(filePath) {
     try {
         const imports = extractImports(filePath, classIndex);
-        const functions = extractFunctionsAndCalls(filePath, repoPath, classIndex, captureSourceCode);
+        const functions = extractFunctionsAndCalls(filePath, repoPath, classIndex, captureSourceCode, captureStatements);
         const classes = extractClasses(filePath, repoPath);
+
+        const statements = captureStatements ? extractFileStatements(filePath) : [];
 
         return {
             path: path.relative(repoPath, filePath),
             importFiles: imports.importFiles,
             externalImports: imports.externalImports,
             functions,
-            classes
+            classes,
+            statements
         };
     } catch (error) {
         console.error(`Error analyzing ${filePath}:`, error.message);

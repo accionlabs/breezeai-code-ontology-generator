@@ -11,7 +11,7 @@
 const fs = require("fs");
 const path = require("path");
 const glob = require("glob");
-const { extractFunctionsAndCalls, extractImports: extractImportsTS } = require("./extract-functions-typescript");
+const { extractFunctionsAndCalls, extractImports: extractImportsTS, extractFileStatements } = require("./extract-functions-typescript");
 const { extractClasses } = require("./extract-classes-typescript");
 const { loadPathAliases, resolveWithAlias } = require("./resolve-path-aliases");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
@@ -165,15 +165,18 @@ function analyzeTypeScriptFiles(repoPath, pathAliases, opts = {}) {
       }
 
       // Extract functions and classes
-      const functions = extractFunctionsAndCalls(file, repoPath, imports, opts.captureSourceCode);
+      const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode, opts.captureStatements);
       const classes = extractClasses(file, repoPath);
+
+      const statements = opts.captureStatements ? extractFileStatements(file) : [];
 
       const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions,
-        classes
+        classes,
+        statements
       };
       if (opts.onResult) {
         opts.onResult(fileResult);
@@ -226,8 +229,9 @@ if (require.main === module) {
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
   const captureSourceCode = process.argv.includes("--capture-source-code");
+  const captureStatements = process.argv.includes("--capture-statements");
 
-  const results = analyzeTypeScriptRepo(repoPath, { captureSourceCode });
+  const results = analyzeTypeScriptRepo(repoPath, { captureSourceCode, captureStatements });
 
   // Write results to file
   fs.writeFileSync(importsOutput, JSON.stringify(results, null, 2));

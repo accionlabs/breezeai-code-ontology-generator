@@ -5,7 +5,7 @@ const path = require("path");
 const glob = require("glob");
 const Parser = require("tree-sitter");
 const Go = require("tree-sitter-go");
-const { extractFunctionsAndCalls, extractImports: extractImportsGo } = require("./extract-functions-golang");
+const { extractFunctionsAndCalls, extractImports: extractImportsGo, extractFileStatements } = require("./extract-functions-golang");
 const { extractClasses } = require("./extract-classes-golang");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
@@ -146,8 +146,10 @@ function analyzeImports(repoPath, opts = {}) {
         }
       }
 
-      const functions = extractFunctionsAndCalls(file, repoPath, imports, opts.captureSourceCode);
+      const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode, opts.captureStatements);
       const classes = extractClasses(file, repoPath);
+
+      const statements = opts.captureStatements ? extractFileStatements(file) : [];
 
       const fileResult = {
         path: path.relative(repoPath, file),
@@ -155,6 +157,7 @@ function analyzeImports(repoPath, opts = {}) {
         externalImports: [...new Set(externalImports)],
         functions,
         classes,
+        statements,
       };
       if (opts.onResult) {
         opts.onResult(fileResult);
@@ -196,10 +199,11 @@ if (require.main === module) {
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
   const captureSourceCode = process.argv.includes("--capture-source-code");
+  const captureStatements = process.argv.includes("--capture-statements");
 
   console.log(`Scanning Go repo: ${repoPath}`);
 
-  const analysis = analyzeGolangRepo(repoPath, { captureSourceCode });
+  const analysis = analyzeGolangRepo(repoPath, { captureSourceCode, captureStatements });
   fs.writeFileSync(importsOutput, JSON.stringify(analysis, null, 2));
 
   console.log(`Output written to → ${importsOutput}`);

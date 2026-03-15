@@ -75,7 +75,8 @@ function analyzeJavaRepo(repoPath, opts = {}) {
             repoPath,
             files: chunk,
             classIndex,
-            captureSourceCode: !!opts.captureSourceCode
+            captureSourceCode: !!opts.captureSourceCode,
+            captureStatements: !!opts.captureStatements
           }
         }
       );
@@ -118,8 +119,9 @@ if (require.main === module) {
   const repoPath = path.resolve(process.argv[2]);
   const outputPath = path.resolve(process.argv[3]);
   const captureSourceCode = process.argv.includes("--capture-source-code");
+  const captureStatements = process.argv.includes("--capture-statements");
 
-  analyzeJavaRepo(repoPath, { captureSourceCode })
+  analyzeJavaRepo(repoPath, { captureSourceCode, captureStatements })
     .then(results => {
       fs.mkdirSync(path.dirname(outputPath), { recursive: true });
       fs.writeFileSync(outputPath, JSON.stringify(results, null, 2));

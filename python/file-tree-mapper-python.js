@@ -10,7 +10,7 @@
 const fs = require("fs");
 const path = require("path");
 const glob = require("glob");
-const { extractFunctionsAndCalls, extractImports } = require("./extract-functions-python");
+const { extractFunctionsAndCalls, extractImports, extractFileStatements } = require("./extract-functions-python");
 const { extractClasses } = require("./extract-classes-python");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
@@ -114,15 +114,18 @@ function analyzeFiles(repoPath, opts = {}) {
       });
 
       // Extract functions and classes
-      const functions = extractFunctionsAndCalls(file, repoPath, imports, opts.captureSourceCode);
+      const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode, opts.captureStatements);
       const classes = extractClasses(file, repoPath);
+
+      const statements = opts.captureStatements ? extractFileStatements(file) : [];
 
       const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions,
-        classes
+        classes,
+        statements
       };
       if (opts.onResult) {
         opts.onResult(fileResult);
@@ -174,8 +177,9 @@ if (require.main === module) {
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
   const captureSourceCode = process.argv.includes("--capture-source-code");
+  const captureStatements = process.argv.includes("--capture-statements");
 
-  const results = analyzePythonRepo(repoPath, { captureSourceCode });
+  const results = analyzePythonRepo(repoPath, { captureSourceCode, captureStatements });
 
   // Write results to file
   fs.writeFileSync(importsOutput, JSON.stringify(results, null, 2));

@@ -8,7 +8,9 @@ const { truncateSourceCode, parseSource } = require("../utils");
 const sharedParser = new Parser();
 sharedParser.setLanguage(TS);
 
-function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false) {
+const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "if_statement", "for_statement", "for_in_statement", "switch_statement", "return_statement", "enum_declaration"];
+
+function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);
 
   const functions = [];
@@ -21,7 +23,7 @@ function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode 
       node.type === "method_definition" ||
       node.type === "function_signature"
     ) {
-      const funcInfo = extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode);
+      const funcInfo = extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode, captureStatements);
       if (funcInfo.name) {
         functions.push(funcInfo);
       }
@@ -31,7 +33,7 @@ function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode 
   return functions;
 }
 
-function extractFunctionInfo(node, filePath, repoPath = null, source, captureSourceCode = false) {
+function extractFunctionInfo(node, filePath, repoPath = null, source, captureSourceCode = false, captureStatements = false) {
   const startLine = node.startPosition.row + 1;
   const endLine = node.endPosition.row + 1;
 
@@ -41,7 +43,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
 
   const { visibility, kind } = getFunctionModifiers(node, source);
 
-  const statements = extractStatements(node, source);
+  const statements = captureStatements ? extractStatements(node, source) : [];
 
   const result = {
     name,
@@ -277,14 +279,62 @@ function extractDirectCalls(funcNode, source) {
   return calls;
 }
 
+function isQueryStatement(node) {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const declarator = node.namedChild(i);
+    const nameNode = declarator.childForFieldName("name");
+    if (nameNode) {
+      const name = nameNode.text || "";
+      if (/query/i.test(name)) return true;
+    }
+  }
+  return false;
+}
+
+function isStringOrTemplateAssignment(node) {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const declarator = node.namedChild(i);
+    const value = declarator.childForFieldName("value") || declarator.childForFieldName("init");
+    if (!value) continue;
+    const vtype = value.type;
+    if (vtype === "template_string" || vtype === "string" || vtype === "string_fragment") return true;
+  }
+  return false;
+}
+
+function isCallAssignment(node) {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const declarator = node.namedChild(i);
+    const value = declarator.childForFieldName("value") || declarator.childForFieldName("init");
+    if (!value) continue;
+    const vtype = value.type;
+    if (vtype === "call_expression" || vtype === "await_expression" || vtype === "member_expression" || vtype === "arrow_function" || vtype === "function_expression" || vtype === "function") return true;
+    if (vtype === "await_expression" && value.namedChildCount > 0) {
+      const inner = value.namedChild(0);
+      if (inner && inner.type === "call_expression") return true;
+    }
+  }
+  return false;
+}
+
+function unwrapExport(node) {
+  if (node.type === "export_statement") {
+    const decl = node.childForFieldName("declaration");
+    if (decl) return decl;
+  }
+  return node;
+}
+
 function extractStatements(node, source) {
   const body = node.childForFieldName("body");
   if (!body) return [];
 
   const statements = [];
   for (let i = 0; i < body.namedChildCount; i++) {
-    const child = body.namedChild(i);
-    if (child.type !== "lexical_declaration") continue;
+    let child = body.namedChild(i);
+    child = unwrapExport(child);
+    if (!STATEMENT_TYPES.includes(child.type)) continue;
+    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && (isCallAssignment(child) || isQueryStatement(child) || isStringOrTemplateAssignment(child))) continue;
     statements.push({
       type: child.type,
       text: source.slice(child.startIndex, child.endIndex),
@@ -448,4 +498,22 @@ function extractFunctionsAndCalls(filePath, repoPath, imports = null, captureSou
   }
 }
 
-module.exports = { extractFunctionsAndCalls, extractImports };
+function extractFileStatements(filePath) {
+  const { source, tree } = parseSource(filePath, sharedParser);
+  const statements = [];
+  for (let i = 0; i < tree.rootNode.namedChildCount; i++) {
+    let child = tree.rootNode.namedChild(i);
+    child = unwrapExport(child);
+    if (!STATEMENT_TYPES.includes(child.type)) continue;
+    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && (isCallAssignment(child) || isQueryStatement(child) || isStringOrTemplateAssignment(child))) continue;
+    statements.push({
+      type: child.type,
+      text: source.slice(child.startIndex, child.endIndex),
+      startLine: child.startPosition.row + 1,
+      endLine: child.endPosition.row + 1,
+    });
+  }
+  return statements;
+}
+
+module.exports = { extractFunctionsAndCalls, extractImports, extractFileStatements };

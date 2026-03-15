@@ -10,6 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const glob = require("glob");
 const { analyzeVBNetFileWithRegex } = require("./regex-parser-vbnet");
+const { extractFileStatements } = require("./extract-functions-vbnet");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // Try to load tree-sitter, but don't fail if it doesn't work
@@ -314,12 +315,15 @@ function analyzeVBNetRepo(repoPath, opts = {}) {
         });
       });
 
+      const statements = opts.captureStatements ? extractFileStatements(file) : [];
+
       const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions: analysis.functions,
-        classes: analysis.classes
+        classes: analysis.classes,
+        statements
       };
       if (opts.onResult) {
         opts.onResult(fileResult);
@@ -357,10 +361,11 @@ if (require.main === module) {
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
   const captureSourceCode = process.argv.includes("--capture-source-code");
+  const captureStatements = process.argv.includes("--capture-statements");
 
   console.log(`📂 Scanning VB.NET repo: ${repoPath}`);
 
-  const results = analyzeVBNetRepo(repoPath, { captureSourceCode });
+  const results = analyzeVBNetRepo(repoPath, { captureSourceCode, captureStatements });
 
   console.log(`\n📊 Summary:`);
   console.log(`   Total VB.NET files: ${results.length}\n`);

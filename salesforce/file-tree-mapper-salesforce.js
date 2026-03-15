@@ -9,7 +9,7 @@ const path = require("path");
 const glob = require("glob");
 const Parser = require("tree-sitter");
 const apex = require("tree-sitter-sfapex");
-const { extractFunctionsAndCalls, extractReferences } = require("./extract-functions-salesforce");
+const { extractFunctionsAndCalls, extractReferences, extractFileStatements } = require("./extract-functions-salesforce");
 const { extractClasses } = require("./extract-classes-salesforce");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
@@ -258,15 +258,18 @@ function analyzeApexFiles(repoPath, classIndex, opts = {}) {
       }
 
       // Extract functions and classes
-      const functions = extractFunctionsAndCalls(file, repoPath, classIndex, references, opts.captureSourceCode);
+      const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode, opts.captureStatements);
       const classes = extractClasses(file, repoPath);
+
+      const statements = opts.captureStatements ? extractFileStatements(file) : [];
 
       const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions: functions,
-        classes
+        classes,
+        statements
       };
       if (opts.onResult) {
         opts.onResult(fileResult);
@@ -305,10 +308,11 @@ if (require.main === module) {
   const repoPath = path.resolve(process.argv[2]);
   const importsOutput = path.resolve(process.argv[3]);
   const captureSourceCode = process.argv.includes("--capture-source-code");
+  const captureStatements = process.argv.includes("--capture-statements");
 
   console.log(`📂 Scanning Salesforce Apex repo: ${repoPath}`);
 
-  const analysis = analyzeSalesforceRepo(repoPath, { captureSourceCode });
+  const analysis = analyzeSalesforceRepo(repoPath, { captureSourceCode, captureStatements });
   fs.writeFileSync(importsOutput, JSON.stringify(analysis, null, 2));
   console.log(`✅ Final output written to → ${importsOutput}`);
 }

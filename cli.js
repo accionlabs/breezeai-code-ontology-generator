@@ -32,6 +32,7 @@ program
   .option("--baseurl <url>", "Base URL of the API (required with --upload)")
   .option("--uuid <uuid>", "UUID identifier (required with --upload)")
   .option("--capture-source-code", "Capture source code for each function", false)
+  .option("--capture-statements", "Capture if/for/switch/return/enum statements for functions and files", false)
   .option("--llmPlatform <name>", "LLM platform for code ontology generation: OPENAI, AWSBEDROCK, GEMINI (default: AWSBEDROCK)")
   .action(async (opts) => {
     if (opts.llmPlatform) {
