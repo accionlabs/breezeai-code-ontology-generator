@@ -31,6 +31,7 @@ function extractClassStatements(node, source) {
   const statements = [];
   for (let i = 0; i < body.namedChildCount; i++) {
     const child = body.namedChild(i);
+    if (child.type === "comment" || child.type === "line_comment" || child.type === "block_comment") continue;
     const nameNode = child.childForFieldName("name");
     statements.push({
       type: child.type,

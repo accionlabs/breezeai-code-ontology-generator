@@ -55,6 +55,7 @@ function extractClassStatements(typeNode, source) {
     if (child.type === "field_declaration_list" || child.type === "method_spec_list") {
       for (let j = 0; j < child.namedChildCount; j++) {
         const member = child.namedChild(j);
+        if (member.type === "comment") continue;
         const nameNode = member.childForFieldName("name");
         statements.push({
           type: member.type,

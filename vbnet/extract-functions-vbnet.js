@@ -7,7 +7,7 @@ const { truncateSourceCode, parseSource } = require("../utils");
 const sharedParser = new Parser();
 sharedParser.setLanguage(VBNet);
 
-const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "if_statement", "for_statement", "for_each_statement", "select_case_statement", "return_statement", "enum_statement"];
+const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "enum_statement"];
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);
@@ -302,32 +302,6 @@ function isQueryStatement(node) {
   return false;
 }
 
-function isStringOrTemplateAssignment(node) {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const declarator = node.namedChild(i);
-    const value = declarator.childForFieldName("value") || declarator.childForFieldName("initializer");
-    if (!value) continue;
-    const vtype = value.type;
-    if (vtype === "string_literal" || vtype === "interpolated_string_expression") return true;
-  }
-  return false;
-}
-
-function isCallAssignment(node) {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const declarator = node.namedChild(i);
-    const value = declarator.childForFieldName("value") || declarator.childForFieldName("initializer");
-    if (!value) continue;
-    const vtype = value.type;
-    if (vtype === "invocation_expression" || vtype === "await_expression" || vtype === "member_access_expression" || vtype === "lambda_expression" || vtype === "multiline_lambda_expression") return true;
-    if (vtype === "await_expression" && value.namedChildCount > 0) {
-      const inner = value.namedChild(0);
-      if (inner && inner.type === "invocation_expression") return true;
-    }
-  }
-  return false;
-}
-
 function extractStatements(node, source) {
   const body = node.childForFieldName("body");
   if (!body) return [];
@@ -336,10 +310,10 @@ function extractStatements(node, source) {
   for (let i = 0; i < body.namedChildCount; i++) {
     const child = body.namedChild(i);
     if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && (isCallAssignment(child) || isQueryStatement(child) || isStringOrTemplateAssignment(child))) continue;
+    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && isQueryStatement(child)) continue;
     statements.push({
       type: child.type,
-      text: source.slice(child.startIndex, child.endIndex),
+      text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
       startLine: child.startPosition.row + 1,
       endLine: child.endPosition.row + 1,
     });
@@ -518,10 +492,10 @@ function extractFileStatements(filePath) {
   for (let i = 0; i < tree.rootNode.namedChildCount; i++) {
     const child = tree.rootNode.namedChild(i);
     if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && (isCallAssignment(child) || isQueryStatement(child) || isStringOrTemplateAssignment(child))) continue;
+    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && isQueryStatement(child)) continue;
     statements.push({
       type: child.type,
-      text: source.slice(child.startIndex, child.endIndex),
+      text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
       startLine: child.startPosition.row + 1,
       endLine: child.endPosition.row + 1,
     });

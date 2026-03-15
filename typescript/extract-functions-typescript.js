@@ -8,7 +8,7 @@ const { truncateSourceCode, parseSource } = require("../utils");
 const sharedParser = new Parser();
 sharedParser.setLanguage(TS);
 
-const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "if_statement", "for_statement", "for_in_statement", "switch_statement", "return_statement", "enum_declaration"];
+const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "enum_declaration"];
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);
@@ -291,32 +291,6 @@ function isQueryStatement(node) {
   return false;
 }
 
-function isStringOrTemplateAssignment(node) {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const declarator = node.namedChild(i);
-    const value = declarator.childForFieldName("value") || declarator.childForFieldName("init");
-    if (!value) continue;
-    const vtype = value.type;
-    if (vtype === "template_string" || vtype === "string" || vtype === "string_fragment") return true;
-  }
-  return false;
-}
-
-function isCallAssignment(node) {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const declarator = node.namedChild(i);
-    const value = declarator.childForFieldName("value") || declarator.childForFieldName("init");
-    if (!value) continue;
-    const vtype = value.type;
-    if (vtype === "call_expression" || vtype === "await_expression" || vtype === "member_expression" || vtype === "arrow_function" || vtype === "function_expression" || vtype === "function") return true;
-    if (vtype === "await_expression" && value.namedChildCount > 0) {
-      const inner = value.namedChild(0);
-      if (inner && inner.type === "call_expression") return true;
-    }
-  }
-  return false;
-}
-
 function unwrapExport(node) {
   if (node.type === "export_statement") {
     const decl = node.childForFieldName("declaration");
@@ -334,10 +308,10 @@ function extractStatements(node, source) {
     let child = body.namedChild(i);
     child = unwrapExport(child);
     if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && (isCallAssignment(child) || isQueryStatement(child) || isStringOrTemplateAssignment(child))) continue;
+    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && isQueryStatement(child)) continue;
     statements.push({
       type: child.type,
-      text: source.slice(child.startIndex, child.endIndex),
+      text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
       startLine: child.startPosition.row + 1,
       endLine: child.endPosition.row + 1,
     });
@@ -505,10 +479,10 @@ function extractFileStatements(filePath) {
     let child = tree.rootNode.namedChild(i);
     child = unwrapExport(child);
     if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && (isCallAssignment(child) || isQueryStatement(child) || isStringOrTemplateAssignment(child))) continue;
+    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && isQueryStatement(child)) continue;
     statements.push({
       type: child.type,
-      text: source.slice(child.startIndex, child.endIndex),
+      text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
       startLine: child.startPosition.row + 1,
       endLine: child.endPosition.row + 1,
     });
