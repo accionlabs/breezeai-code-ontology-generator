@@ -19,7 +19,11 @@
       "Bash(node:*)",
       "Bash(npm ls:*)",
       "Bash(ls:*)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(zcat:*)",
+      "Bash(for lang:*)",
+      "Bash(do echo:*)",
+      "Read(//mnt/c/Users/AnirudhaGohokar/Desktop/projects/breeze.ai/repositories/BREEZE.AI_WEBUI/**)"
     ]
   }
 }

@@ -15,6 +15,47 @@
 # OS files
 .DS_Store
 
+################################################
+# CROSS-LANGUAGE POLLUTION PREVENTION
+#
+# IMPORTANT: These MUST stay in the common file.
+# They were previously removed thinking they only
+# mattered for their own language (e.g. node_modules
+# only for JS). But dependency/build folders often
+# contain source files in OTHER languages (e.g.
+# .py and .php files inside node_modules/katex and
+# node_modules/flatted). When the Python or PHP
+# parser runs, it picks those up unless excluded
+# globally here. Language-specific .repoignore files
+# only apply when THAT language's parser runs, so
+# they cannot protect against cross-language leakage.
+################################################
+
+# Dependencies - contain third-party code in mixed languages
+node_modules/
+bower_components/
+vendor/
+packages/
+site-packages/
+
+# Build output - contain transpiled/generated code in any language
+dist/
+build/
+out/
+target/
+bin/
+obj/
+
+# Virtual environments - contain native extensions and bundled scripts
+venv/
+.venv/
+
+# Build tool caches - contain downloaded dependencies with mixed-language code
+.gradle/
+.m2/
+.nuget/
+pkg/mod/
+
 # Common directories
 coverage/
 logs/
