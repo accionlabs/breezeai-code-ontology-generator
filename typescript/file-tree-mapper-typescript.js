@@ -165,7 +165,7 @@ function analyzeTypeScriptFiles(repoPath, pathAliases, opts = {}) {
       }
 
       // Extract functions and classes
-      const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode, opts.captureStatements);
+      const functions = extractFunctionsAndCalls(file, repoPath, null, opts.captureSourceCode, opts.captureStatements);
       const classes = extractClasses(file, repoPath, opts.captureStatements);
 
       const statements = opts.captureStatements ? extractFileStatements(file) : [];

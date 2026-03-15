@@ -282,9 +282,9 @@ function traverse(node, cb) {
   }
 }
 
-function extractFunctionsAndCalls(filePath, repoPath, imports = null, captureSourceCode = false) {
+function extractFunctionsAndCalls(filePath, repoPath, imports = null, captureSourceCode = false, captureStatements = false) {
   try {
-    const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
+    const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode, captureStatements);
     if (!imports) imports = extractImports(filePath);
 
     const functionMap = new Map();

@@ -284,9 +284,9 @@ function extractImports(filePath) {
   return imports;
 }
 
-function extractFunctionsAndCalls(filePath, repoPath, imports = null, captureSourceCode = false) {
+function extractFunctionsAndCalls(filePath, repoPath, imports = null, captureSourceCode = false, captureStatements = false) {
   try {
-    const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
+    const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode, captureStatements);
     if (!imports) imports = extractImports(filePath);
 
     // Get go.mod info for module-based import resolution

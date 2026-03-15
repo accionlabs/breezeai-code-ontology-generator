@@ -249,9 +249,9 @@ function resolveReference(reference, currentFilePath, repoPath, classIndex) {
   return null; // External or standard Salesforce class
 }
 
-function extractFunctionsAndCalls(filePath, repoPath, classIndex = {}, references = null, captureSourceCode = false) {
+function extractFunctionsAndCalls(filePath, repoPath, classIndex = {}, references = null, captureSourceCode = false, captureStatements = false) {
   try {
-    const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
+    const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode, captureStatements);
     if (!references) references = extractReferences(filePath);
 
     const functionMap = new Map();

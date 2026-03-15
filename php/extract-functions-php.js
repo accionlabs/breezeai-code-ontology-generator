@@ -542,9 +542,9 @@ function resolveCallPath(call, index, currentFilePath) {
   return null;
 }
 
-function extractFunctionsAndCalls(filePath, repoPath, index = {}, captureSourceCode = false) {
+function extractFunctionsAndCalls(filePath, repoPath, index = {}, captureSourceCode = false, captureStatements = false) {
   try {
-    const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
+    const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode, captureStatements);
     const currentFilePath = path.relative(repoPath, filePath);
 
     const { classIndex = {}, fqcnIndex = {}, methodIndex = {}, varTypes = {} } = index;
