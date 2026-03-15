@@ -7,7 +7,7 @@ const { parseSource } = require("../utils");
 const sharedParser = new Parser();
 sharedParser.setLanguage(Go);
 
-function extractClasses(filePath, repoPath = null) {
+function extractClasses(filePath, repoPath = null, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);
 
   const classes = [];
@@ -17,7 +17,7 @@ function extractClasses(filePath, repoPath = null) {
       // Check if it's a struct or interface type
       const typeSpec = node.childForFieldName("spec");
       if (typeSpec && typeSpec.type === "type_spec") {
-        const classInfo = extractClassInfo(typeSpec, filePath, repoPath, source);
+        const classInfo = extractClassInfo(typeSpec, filePath, repoPath, source, captureStatements);
         if (classInfo?.name) {
           classes.push(classInfo);
         }
@@ -30,7 +30,7 @@ function extractClasses(filePath, repoPath = null) {
           for (let j = 0; j < child.childCount; j++) {
             const spec = child.child(j);
             if (spec.type === "type_spec") {
-              const classInfo = extractClassInfo(spec, filePath, repoPath, source);
+              const classInfo = extractClassInfo(spec, filePath, repoPath, source, captureStatements);
               if (classInfo?.name) {
                 classes.push(classInfo);
               }
@@ -77,7 +77,7 @@ function traverse(node, cb) {
   }
 }
 
-function extractClassInfo(typeSpec, filePath, repoPath = null, source) {
+function extractClassInfo(typeSpec, filePath, repoPath = null, source, captureStatements = false) {
   const startLine = typeSpec.startPosition.row + 1;
   const endLine = typeSpec.endPosition.row + 1;
 
@@ -111,7 +111,7 @@ function extractClassInfo(typeSpec, filePath, repoPath = null, source) {
     return null;
   }
 
-  const statements = extractClassStatements(typeNode, source);
+  const statements = captureStatements ? extractClassStatements(typeNode, source) : [];
 
   return {
     name,

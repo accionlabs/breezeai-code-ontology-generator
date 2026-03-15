@@ -240,7 +240,7 @@ function analyzeImports(repoPath, mapper, opts = {}) {
       // Extract functions for this file
       const functions = extractFuncitonAndItsCalls(file, repoPath, imports, opts.captureSourceCode, opts.captureStatements);
 
-      const classes = extractClasses(file, repoPath)
+      const classes = extractClasses(file, repoPath, opts.captureStatements)
 
       const statements = opts.captureStatements ? extractFileStatements(file) : [];
 

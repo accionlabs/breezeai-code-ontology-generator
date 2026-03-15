@@ -115,7 +115,7 @@ function analyzeFiles(repoPath, opts = {}) {
 
       // Extract functions and classes
       const functions = extractFunctionsAndCalls(file, repoPath, opts.captureSourceCode, opts.captureStatements);
-      const classes = extractClasses(file, repoPath);
+      const classes = extractClasses(file, repoPath, opts.captureStatements);
 
       const statements = opts.captureStatements ? extractFileStatements(file) : [];
 

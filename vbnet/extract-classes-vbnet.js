@@ -6,7 +6,7 @@ const { parseSource } = require("../utils");
 const sharedParser = new Parser();
 sharedParser.setLanguage(VBNet);
 
-function extractClasses(filePath, repoPath = null) {
+function extractClasses(filePath, repoPath = null, captureStatements = false) {
   try {
     const { source, tree } = parseSource(filePath, sharedParser);
 
@@ -20,7 +20,7 @@ function extractClasses(filePath, repoPath = null) {
         node.type === "module_statement" ||
         node.type === "enum_statement"
       ) {
-        const classInfo = extractClassInfo(node, filePath, repoPath, source);
+        const classInfo = extractClassInfo(node, filePath, repoPath, source, captureStatements);
         if (classInfo?.name) {
           classes.push(classInfo);
         }
@@ -82,7 +82,7 @@ function traverse(node, cb) {
   }
 }
 
-function extractClassInfo(node, filePath, repoPath = null, source) {
+function extractClassInfo(node, filePath, repoPath = null, source, captureStatements = false) {
   const startLine = node.startPosition.row + 1;
   const endLine = node.endPosition.row + 1;
 
@@ -97,7 +97,7 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
 
   const { visibility, isAbstract } = getClassModifiers(node, source);
 
-  const statements = extractClassStatements(node, source);
+  const statements = captureStatements ? extractClassStatements(node, source) : [];
 
   const result = {
     name,

@@ -8,13 +8,13 @@ const { parseSource } = require("../utils");
 const sharedParser = new Parser();
 sharedParser.setLanguage(JavaScript);
 
-function extractClasses(filePath, repoPath = null) {
+function extractClasses(filePath, repoPath = null, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);
 
   const classes = [];
 
   traverse(tree.rootNode, (node) => {
-      const classInfo = extractClassInfo(node, filePath, repoPath);
+      const classInfo = extractClassInfo(node, filePath, repoPath, captureStatements);
       // Filter out classes with null names
       if (classInfo?.name) {
         classes.push(classInfo);
@@ -55,7 +55,7 @@ function traverse(node, cb, parent = null) {
    Class extraction (JavaScript – Tree-sitter)
    ========================================================= */
 
-function extractClassInfo(node, filePath, repoPath = null) {
+function extractClassInfo(node, filePath, repoPath = null, captureStatements = false) {
   if (node.type !== "class_declaration" && node.type !== "class") {
     return null;
   }
@@ -73,7 +73,7 @@ function extractClassInfo(node, filePath, repoPath = null) {
 
 //    const relativePath = repoPath ? path.relative(repoPath, filePath) : filePath;
 
-  const statements = extractClassStatements(node);
+  const statements = captureStatements ? extractClassStatements(node) : [];
 
   return {
     name,

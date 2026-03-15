@@ -6,7 +6,7 @@ const { parseSource } = require("../utils");
 const sharedParser = new Parser();
 sharedParser.setLanguage(Python);
 
-function extractClasses(filePath, repoPath) {
+function extractClasses(filePath, repoPath, captureStatements = false) {
   try {
     const { source, tree } = parseSource(filePath, sharedParser);
 
@@ -14,7 +14,7 @@ function extractClasses(filePath, repoPath) {
 
     traverse(tree.rootNode, (node) => {
       if (node.type === "class_definition") {
-        const classInfo = extractClassInfo(node, source);
+        const classInfo = extractClassInfo(node, source, captureStatements);
         if (classInfo.name) {
           classes.push(classInfo);
         }
@@ -28,7 +28,7 @@ function extractClasses(filePath, repoPath) {
   }
 }
 
-function extractClassInfo(node, source) {
+function extractClassInfo(node, source, captureStatements = false) {
   const nameNode = node.childForFieldName("name");
   const name = nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null;
 
@@ -95,7 +95,7 @@ function extractClassInfo(node, source) {
     });
   }
 
-  const statements = extractClassStatements(node, source);
+  const statements = captureStatements ? extractClassStatements(node, source) : [];
 
   // Match TypeScript format
   return {

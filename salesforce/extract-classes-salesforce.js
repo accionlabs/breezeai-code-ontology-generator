@@ -7,14 +7,14 @@ const { parseSource } = require("../utils");
 const sharedParser = new Parser();
 sharedParser.setLanguage(Apex.apex);
 
-function extractClasses(filePath, repoPath = null) {
+function extractClasses(filePath, repoPath = null, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);
 
   const classes = [];
 
   traverse(tree.rootNode, (node) => {
     if (node.type === "class_declaration" || node.type === "interface_declaration") {
-      const classInfo = extractClassInfo(node, filePath, repoPath, source);
+      const classInfo = extractClassInfo(node, filePath, repoPath, source, captureStatements);
       if (classInfo?.name) {
         classes.push(classInfo);
       }
@@ -51,7 +51,7 @@ function traverse(node, cb) {
   }
 }
 
-function extractClassInfo(node, filePath, repoPath = null, source) {
+function extractClassInfo(node, filePath, repoPath = null, source, captureStatements = false) {
   const startLine = node.startPosition.row + 1;
   const endLine = node.endPosition.row + 1;
 
@@ -67,7 +67,7 @@ function extractClassInfo(node, filePath, repoPath = null, source) {
 
   const { visibility, isAbstract } = getClassModifiers(node, source);
 
-  const statements = extractClassStatements(node, source);
+  const statements = captureStatements ? extractClassStatements(node, source) : [];
 
   return {
     name,

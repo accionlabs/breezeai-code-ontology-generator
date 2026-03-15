@@ -16,7 +16,7 @@ function analyzeFile(filePath) {
     try {
         const imports = extractImports(filePath, classIndex);
         const functions = extractFunctionsAndCalls(filePath, repoPath, classIndex, captureSourceCode, captureStatements);
-        const classes = extractClasses(filePath, repoPath);
+        const classes = extractClasses(filePath, repoPath, captureStatements);
 
         const statements = captureStatements ? extractFileStatements(filePath) : [];
 
