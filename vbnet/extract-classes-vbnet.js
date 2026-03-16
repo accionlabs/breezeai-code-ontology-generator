@@ -14,11 +14,11 @@ function extractClasses(filePath, repoPath = null, captureStatements = false) {
 
     traverse(tree.rootNode, (node) => {
       if (
-        node.type === "class_statement" ||
-        node.type === "interface_statement" ||
-        node.type === "structure_statement" ||
-        node.type === "module_statement" ||
-        node.type === "enum_statement"
+        node.type === "class_block" ||
+        node.type === "interface_block" ||
+        node.type === "structure_block" ||
+        node.type === "module_block" ||
+        node.type === "enum_block"
       ) {
         const classInfo = extractClassInfo(node, filePath, repoPath, source, captureStatements);
         if (classInfo?.name) {
@@ -34,7 +34,7 @@ function extractClasses(filePath, repoPath = null, captureStatements = false) {
   }
 }
 
-const CLASS_STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "enum_statement", "field_declaration"];
+const CLASS_STATEMENT_TYPES = ["dim_statement", "const_declaration", "field_declaration", "enum_block", "enum_member", "attribute_block"];
 
 function extractClassStatements(node, source) {
   const statements = [];
@@ -108,15 +108,15 @@ function extractClassInfo(node, filePath, repoPath = null, source, captureStatem
 
 function getTypeKind(node) {
   switch (node.type) {
-    case "class_statement":
+    case "class_block":
       return "class";
-    case "interface_statement":
+    case "interface_block":
       return "interface";
-    case "structure_statement":
+    case "structure_block":
       return "structure";
-    case "module_statement":
+    case "module_block":
       return "module";
-    case "enum_statement":
+    case "enum_block":
       return "enum";
     default:
       return "class";
@@ -213,18 +213,18 @@ function extractClassMembers(classNode, source, typeKind) {
 
     // Skip nested classes
     if (
-      member.type === "class_statement" ||
-      member.type === "structure_statement" ||
-      member.type === "module_statement"
+      member.type === "class_block" ||
+      member.type === "structure_block" ||
+      member.type === "module_block"
     ) {
       return;
     }
 
     // Methods
     if (
-      member.type === "function_statement" ||
-      member.type === "sub_statement" ||
-      member.type === "property_statement"
+      member.type === "method_declaration" ||
+      member.type === "constructor_declaration" ||
+      member.type === "property_declaration"
     ) {
       // Make sure this method is a direct child of the class (not nested in another class)
       let parent = member.parent;
@@ -235,9 +235,9 @@ function extractClassMembers(classNode, source, typeKind) {
           break;
         }
         if (
-          parent.type === "class_statement" ||
-          parent.type === "structure_statement" ||
-          parent.type === "module_statement"
+          parent.type === "class_block" ||
+          parent.type === "structure_block" ||
+          parent.type === "module_block"
         ) {
           // This is nested inside another type
           break;
@@ -250,7 +250,7 @@ function extractClassMembers(classNode, source, typeKind) {
       const methodName = getMethodName(member, source);
       if (methodName) {
         // Handle constructor (New sub)
-        if (methodName.toLowerCase() === "new" && member.type === "sub_statement") {
+        if (methodName.toLowerCase() === "new" && member.type === "constructor_declaration") {
           constructorParams = extractConstructorParams(member, source);
         }
         methods.push(methodName);

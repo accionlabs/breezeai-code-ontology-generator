@@ -7,7 +7,7 @@ const { truncateSourceCode, parseSource } = require("../utils");
 const sharedParser = new Parser();
 sharedParser.setLanguage(VBNet);
 
-const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "enum_statement"];
+const STATEMENT_TYPES = ["dim_statement", "const_declaration", "field_declaration", "enum_block", "enum_member", "attribute_block"];
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);
@@ -17,10 +17,10 @@ function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode 
   traverse(tree.rootNode, (node) => {
     // VB.NET function/sub declarations
     if (
-      node.type === "function_statement" ||
-      node.type === "sub_statement" ||
-      node.type === "property_statement" ||
-      node.type === "operator_statement"
+      node.type === "method_declaration" ||
+      node.type === "constructor_declaration" ||
+      node.type === "property_declaration" ||
+      node.type === "delegate_declaration"
     ) {
       const funcInfo = extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode, captureStatements);
       if (funcInfo.name) {
@@ -65,14 +65,14 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
 
 function getFunctionType(node) {
   switch (node.type) {
-    case "function_statement":
+    case "method_declaration":
       return "function";
-    case "sub_statement":
-      return "sub";
-    case "property_statement":
+    case "constructor_declaration":
+      return "constructor";
+    case "property_declaration":
       return "property";
-    case "operator_statement":
-      return "operator";
+    case "delegate_declaration":
+      return "delegate";
     default:
       return "function";
   }
@@ -86,10 +86,10 @@ function getFunctionModifiers(node, source) {
   let parent = node.parent;
   while (parent) {
     if (
-      parent.type === "class_statement" ||
-      parent.type === "module_statement" ||
-      parent.type === "structure_statement" ||
-      parent.type === "interface_statement"
+      parent.type === "class_block" ||
+      parent.type === "module_block" ||
+      parent.type === "structure_block" ||
+      parent.type === "interface_block"
     ) {
       kind = "method";
       break;
@@ -303,14 +303,27 @@ function isQueryStatement(node) {
 }
 
 function extractStatements(node, source) {
-  const body = node.childForFieldName("body");
-  if (!body) return [];
-
+  // VB.NET method_declaration has statements as direct children (no body field)
   const statements = [];
-  for (let i = 0; i < body.namedChildCount; i++) {
-    const child = body.namedChild(i);
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    // statement node wraps actual statements in VB.NET grammar
+    if (child.type === "statement") {
+      for (let j = 0; j < child.namedChildCount; j++) {
+        const stmt = child.namedChild(j);
+        if (!STATEMENT_TYPES.includes(stmt.type)) continue;
+        if (stmt.type === "dim_statement" && isQueryStatement(stmt)) continue;
+        statements.push({
+          type: stmt.type,
+          text: source.slice(stmt.startIndex, stmt.endIndex).slice(0, 200),
+          startLine: stmt.startPosition.row + 1,
+          endLine: stmt.endPosition.row + 1,
+        });
+      }
+    }
+    // Also check direct children matching statement types
     if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && isQueryStatement(child)) continue;
+    if (child.type === "dim_statement" && isQueryStatement(child)) continue;
     statements.push({
       type: child.type,
       text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
@@ -489,17 +502,34 @@ function extractFunctionsAndCalls(filePath, repoPath, index = {}, captureSourceC
 function extractFileStatements(filePath) {
   const { source, tree } = parseSource(filePath, sharedParser);
   const statements = [];
-  for (let i = 0; i < tree.rootNode.namedChildCount; i++) {
-    const child = tree.rootNode.namedChild(i);
-    if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && isQueryStatement(child)) continue;
-    statements.push({
-      type: child.type,
-      text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
-      startLine: child.startPosition.row + 1,
-      endLine: child.endPosition.row + 1,
-    });
+
+  function collectStatements(node) {
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (STATEMENT_TYPES.includes(child.type)) {
+        if (child.type === "dim_statement" && isQueryStatement(child)) continue;
+        statements.push({
+          type: child.type,
+          text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+          startLine: child.startPosition.row + 1,
+          endLine: child.endPosition.row + 1,
+        });
+      }
+      // Traverse into type_declaration, class_block, module_block, etc. to find nested statements
+      if (
+        child.type === "type_declaration" ||
+        child.type === "class_block" ||
+        child.type === "module_block" ||
+        child.type === "structure_block" ||
+        child.type === "namespace_block" ||
+        child.type === "enum_block"
+      ) {
+        collectStatements(child);
+      }
+    }
   }
+
+  collectStatements(tree.rootNode);
   return statements;
 }
 
