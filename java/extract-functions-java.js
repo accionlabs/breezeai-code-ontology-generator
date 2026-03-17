@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const Java = require("tree-sitter-java");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, readSource, containsDbQuery, isDbCallMethod } = require("../utils");
+const { truncateSourceCode, parseSource, readSource, containsDbQuery, getDbFromMethod } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(Java);
@@ -354,12 +354,13 @@ function collectQueryStatements(node, source, statements) {
       const nameNode = n.childForFieldName("name");
       const methodName = nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null;
 
-      if (methodName && isDbCallMethod(methodName)) {
+      const db = getDbFromMethod(methodName);
+      if (db) {
         const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
         if (!seen.has(key)) {
           seen.add(key);
           statements.push({
-            type: "query_statement",
+            type: "query_statement", db,
             text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
             startLine: n.startPosition.row + 1,
             endLine: n.endPosition.row + 1,

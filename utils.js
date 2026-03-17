@@ -77,63 +77,93 @@ function parseSource(filePath, parser) {
 // Query statement detection patterns
 // -----------------------------------------------------------
 
-/** Method names that indicate a DB query call.
- *  Only include names that are unambiguously database-related.
- *  Avoid generic names like get, set, run, all, find, delete, put, post, remove, search, index, doc, etc.
+/**
+ * Database method signatures organized by database/ORM.
+ * Each key is a database identifier, value is an array of method names unique to that DB.
+ * Used to both detect query statements AND identify which database is integrated.
  */
-const DB_CALL_METHODS = new Set([
-  // SQL / generic
-  'query', 'rawQuery', 'raw', 'execute', 'exec', 'executeSql',
-  'prepare', 'prepareStatement', 'executeQuery', 'executeUpdate',
-  // ORM (Sequelize, Prisma, TypeORM, Hibernate)
-  'findAll', 'findOne', 'findMany', 'findFirst', 'findUnique',
-  'findById', 'findByPk', 'findOrCreate', 'findAndCountAll',
-  'upsert', 'bulkCreate', 'createQueryBuilder', 'getRepository',
-  // MongoDB / Mongoose
-  'findOneAndUpdate', 'findOneAndDelete', 'findOneAndReplace',
-  'insertOne', 'insertMany', 'updateOne', 'updateMany',
-  'deleteOne', 'deleteMany', 'replaceOne',
-  'countDocuments', 'estimatedDocumentCount',
-  'aggregate', 'bulkWrite',
-  // Neo4j
-  'readTransaction', 'writeTransaction', 'executeRead', 'executeWrite',
-  // CouchDB / PouchDB
-  'allDocs', 'bulkDocs',
-  'createIndex', 'getIndexes', 'deleteIndex',
-  // Redis
-  'hget', 'hset', 'hgetall', 'hdel', 'hmset', 'hmget',
-  'lpush', 'rpush', 'lpop', 'rpop', 'lrange',
-  'sadd', 'srem', 'smembers', 'sismember',
-  'zadd', 'zrem', 'zrange', 'zrangebyscore',
-  'mset', 'mget',
-  // DynamoDB
-  'getItem', 'putItem', 'deleteItem', 'updateItem',
-  'batchGetItem', 'batchWriteItem', 'transactGetItems', 'transactWriteItems',
-  // Elasticsearch
-  'msearch',
-  // Firebase / Firestore
-  'getDocs', 'getDoc', 'setDoc', 'updateDoc', 'deleteDoc',
-  'addDoc', 'onSnapshot',
-  // Entity Framework Core / LINQ (C#, VB.NET)
-  'ToListAsync', 'ToList', 'ToArrayAsync', 'ToArray',
-  'FirstOrDefaultAsync', 'FirstOrDefault', 'FirstAsync',
-  'SingleOrDefaultAsync', 'SingleOrDefault', 'SingleAsync',
-  'LastOrDefaultAsync', 'LastOrDefault',
-  'CountAsync', 'LongCountAsync', 'AnyAsync', 'AllAsync',
-  'MinAsync', 'MaxAsync', 'SumAsync', 'AverageAsync',
-  'FindAsync', 'AddAsync', 'AddRangeAsync',
-  'SaveChangesAsync', 'SaveChanges',
-  'Include', 'ThenInclude', 'AsNoTracking', 'AsTracking',
-  'FromSqlRaw', 'FromSqlInterpolated', 'ExecuteSqlRaw', 'ExecuteSqlInterpolated',
-  // Django ORM (Python)
-  'objects', 'filter', 'exclude', 'values', 'values_list',
-  'annotate', 'order_by', 'select_related', 'prefetch_related',
-  'get_or_create', 'update_or_create', 'bulk_update',
-  // SQLAlchemy (Python)
-  'session_query', 'add_all', 'flush', 'commit', 'rollback',
-  // ActiveRecord (Ruby-style, also used in some JS ORMs)
-  'where', 'includes', 'joins', 'preload', 'eager_load',
-]);
+const DB_METHOD_MAP = {
+  sql: [
+    'query', 'rawQuery', 'raw', 'execute', 'exec', 'executeSql',
+    'prepare', 'prepareStatement', 'executeQuery', 'executeUpdate',
+  ],
+  sequelize: [
+    'findAll', 'findOne', 'findByPk', 'findOrCreate', 'findAndCountAll',
+    'upsert', 'bulkCreate',
+  ],
+  prisma: [
+    'findMany', 'findFirst', 'findUnique',
+  ],
+  typeorm: [
+    'createQueryBuilder', 'getRepository',
+  ],
+  mongodb: [
+    'findOneAndUpdate', 'findOneAndDelete', 'findOneAndReplace',
+    'insertOne', 'insertMany', 'updateOne', 'updateMany',
+    'deleteOne', 'deleteMany', 'replaceOne',
+    'countDocuments', 'estimatedDocumentCount',
+    'aggregate', 'bulkWrite',
+  ],
+  neo4j: [
+    'readTransaction', 'writeTransaction', 'executeRead', 'executeWrite',
+  ],
+  couchdb: [
+    'allDocs', 'bulkDocs',
+    'createIndex', 'getIndexes', 'deleteIndex',
+  ],
+  redis: [
+    'hget', 'hset', 'hgetall', 'hdel', 'hmset', 'hmget',
+    'lpush', 'rpush', 'lpop', 'rpop', 'lrange',
+    'sadd', 'srem', 'smembers', 'sismember',
+    'zadd', 'zrem', 'zrange', 'zrangebyscore',
+    'mset', 'mget',
+  ],
+  dynamodb: [
+    'getItem', 'putItem', 'deleteItem', 'updateItem',
+    'batchGetItem', 'batchWriteItem', 'transactGetItems', 'transactWriteItems',
+  ],
+  elasticsearch: [
+    'msearch',
+  ],
+  firebase: [
+    'getDocs', 'getDoc', 'setDoc', 'updateDoc', 'deleteDoc',
+    'addDoc', 'onSnapshot',
+  ],
+  entity_framework: [
+    'ToListAsync', 'ToList', 'ToArrayAsync', 'ToArray',
+    'FirstOrDefaultAsync', 'FirstOrDefault', 'FirstAsync',
+    'SingleOrDefaultAsync', 'SingleOrDefault', 'SingleAsync',
+    'LastOrDefaultAsync', 'LastOrDefault',
+    'CountAsync', 'LongCountAsync', 'AnyAsync', 'AllAsync',
+    'MinAsync', 'MaxAsync', 'SumAsync', 'AverageAsync',
+    'FindAsync', 'AddAsync', 'AddRangeAsync',
+    'SaveChangesAsync', 'SaveChanges',
+    'Include', 'ThenInclude', 'AsNoTracking', 'AsTracking',
+    'FromSqlRaw', 'FromSqlInterpolated', 'ExecuteSqlRaw', 'ExecuteSqlInterpolated',
+  ],
+  django: [
+    'select_related', 'prefetch_related',
+    'get_or_create', 'update_or_create', 'bulk_update',
+    'values_list',
+  ],
+  sqlalchemy: [
+    'session_query', 'add_all',
+  ],
+  hibernate: [
+    'findById', 'findAll',
+  ],
+};
+
+// Build a reverse lookup: method name -> database name
+const METHOD_TO_DB = new Map();
+for (const [db, methods] of Object.entries(DB_METHOD_MAP)) {
+  for (const method of methods) {
+    // If a method appears in multiple DBs, first one wins (more specific DBs should be listed first)
+    if (!METHOD_TO_DB.has(method)) {
+      METHOD_TO_DB.set(method, db);
+    }
+  }
+}
 
 /** Database query language patterns */
 const QUERY_PATTERNS = [
@@ -167,12 +197,13 @@ function containsDbQuery(text) {
 
 /**
  * Check if a method name is a known DB call method.
+ * @returns {string|null} - Database name (e.g. 'mongodb', 'redis', 'entity_framework') or null if not a DB method.
  */
-function isDbCallMethod(methodName) {
-  return DB_CALL_METHODS.has(methodName);
+function getDbFromMethod(methodName) {
+  return METHOD_TO_DB.get(methodName) || null;
 }
 
 module.exports = {
   truncateSourceCode, readSource, parseSource,
-  containsDbQuery, isDbCallMethod, QUERY_PATTERNS
+  containsDbQuery, getDbFromMethod, DB_METHOD_MAP, QUERY_PATTERNS
 };

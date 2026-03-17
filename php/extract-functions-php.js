@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const PHP = require("tree-sitter-php").php;
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, containsDbQuery, isDbCallMethod } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(PHP);
@@ -620,12 +620,13 @@ function collectQueryStatements(node, source, statements) {
         methodName = nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null;
         objectName = scopeNode ? source.slice(scopeNode.startIndex, scopeNode.endIndex) : null;
       }
-      if (methodName && isDbCallMethod(methodName)) {
+      const db = getDbFromMethod(methodName);
+      if (db) {
         const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
         if (!seen.has(key)) {
           seen.add(key);
           statements.push({
-            type: "query_statement", method: methodName, object: objectName,
+            type: "query_statement", db, method: methodName, object: objectName,
             text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
             startLine: n.startPosition.row + 1, endLine: n.endPosition.row + 1,
           });
