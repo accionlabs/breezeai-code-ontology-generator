@@ -2,6 +2,7 @@ const Parser = require("tree-sitter");
 const PHP = require("tree-sitter-php").php;
 const fs = require("fs");
 const { parseSource } = require("../utils");
+const { collectQueryStatements } = require("./extract-functions-php");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(PHP);
@@ -60,6 +61,7 @@ function extractClassStatements(node, source) {
       endLine: child.endPosition.row + 1,
     });
   }
+  collectQueryStatements(node, source, statements);
   return statements;
 }
 

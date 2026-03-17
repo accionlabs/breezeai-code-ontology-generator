@@ -4,6 +4,7 @@ const JavaScript = require("tree-sitter-javascript");
 const fs = require("fs");
 const path = require("path");
 const { parseSource } = require("../utils");
+const { collectQueryStatements } = require("./extract-functions-nodejs");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(JavaScript);
@@ -14,7 +15,7 @@ function extractClasses(filePath, repoPath = null, captureStatements = false) {
   const classes = [];
 
   traverse(tree.rootNode, (node) => {
-      const classInfo = extractClassInfo(node, filePath, repoPath, captureStatements);
+      const classInfo = extractClassInfo(node, filePath, repoPath, source, captureStatements);
       // Filter out classes with null names
       if (classInfo?.name) {
         classes.push(classInfo);
@@ -26,7 +27,7 @@ function extractClasses(filePath, repoPath = null, captureStatements = false) {
 
 const CLASS_STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition"];
 
-function extractClassStatements(node) {
+function extractClassStatements(node, source) {
   const body = node.childForFieldName("body");
   if (!body) return [];
 
@@ -43,6 +44,9 @@ function extractClassStatements(node) {
       endLine: child.endPosition.row + 1,
     });
   }
+
+  collectQueryStatements(node, source, statements);
+
   return statements;
 }
 
@@ -57,7 +61,7 @@ function traverse(node, cb, parent = null) {
    Class extraction (JavaScript – Tree-sitter)
    ========================================================= */
 
-function extractClassInfo(node, filePath, repoPath = null, captureStatements = false) {
+function extractClassInfo(node, filePath, repoPath = null, source = null, captureStatements = false) {
   if (node.type !== "class_declaration" && node.type !== "class") {
     return null;
   }
@@ -75,7 +79,7 @@ function extractClassInfo(node, filePath, repoPath = null, captureStatements = f
 
 //    const relativePath = repoPath ? path.relative(repoPath, filePath) : filePath;
 
-  const statements = captureStatements ? extractClassStatements(node) : [];
+  const statements = captureStatements ? extractClassStatements(node, source) : [];
 
   return {
     name,

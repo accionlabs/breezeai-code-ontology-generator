@@ -3,6 +3,7 @@ const TS = require("tree-sitter-typescript").typescript;
 const fs = require("fs");
 const path = require("path");
 const { parseSource } = require("../utils");
+const { collectQueryStatements } = require("./extract-functions-typescript");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(TS);
@@ -43,6 +44,9 @@ function extractClassStatements(node, source) {
       endLine: child.endPosition.row + 1,
     });
   }
+
+  collectQueryStatements(node, source, statements);
+
   return statements;
 }
 

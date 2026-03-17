@@ -3,6 +3,7 @@ const CSharp = require("tree-sitter-c-sharp");
 const fs = require("fs");
 const path = require("path");
 const { parseSource } = require("../utils");
+const { collectQueryStatements } = require("./extract-functions-csharp");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(CSharp);
@@ -49,6 +50,7 @@ function extractClassStatements(node, source) {
       endLine: child.endPosition.row + 1,
     });
   }
+  collectQueryStatements(node, source, statements);
   return statements;
 }
 

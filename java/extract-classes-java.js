@@ -3,6 +3,7 @@ const Java = require("tree-sitter-java");
 const fs = require("fs");
 const path = require("path");
 const { parseSource } = require("../utils");
+const { collectQueryStatements } = require("./extract-functions-java");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(Java);
@@ -43,6 +44,7 @@ function extractClassStatements(node, source) {
       endLine: child.endPosition.row + 1,
     });
   }
+  collectQueryStatements(node, source, statements);
   return statements;
 }
 

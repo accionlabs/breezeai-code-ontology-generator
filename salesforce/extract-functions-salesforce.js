@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const Apex = require("tree-sitter-sfapex");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, isDbCallMethod } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(Apex.apex);
@@ -171,18 +171,6 @@ function extractCallInfo(node, source) {
   };
 }
 
-function isQueryStatement(node) {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const declarator = node.namedChild(i);
-    const nameNode = declarator.childForFieldName("name");
-    if (nameNode) {
-      const name = nameNode.text || "";
-      if (/query/i.test(name)) return true;
-    }
-  }
-  return false;
-}
-
 function extractStatements(node, source) {
   const body = node.childForFieldName("body");
   if (!body) return [];
@@ -191,7 +179,6 @@ function extractStatements(node, source) {
   for (let i = 0; i < body.namedChildCount; i++) {
     const child = body.namedChild(i);
     if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && isQueryStatement(child)) continue;
     statements.push({
       type: child.type,
       text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
@@ -199,6 +186,7 @@ function extractStatements(node, source) {
       endLine: child.endPosition.row + 1,
     });
   }
+  collectQueryStatements(node, source, statements);
   return statements;
 }
 
@@ -299,7 +287,6 @@ function extractFileStatements(filePath) {
   for (let i = 0; i < tree.rootNode.namedChildCount; i++) {
     const child = tree.rootNode.namedChild(i);
     if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && isQueryStatement(child)) continue;
     statements.push({
       type: child.type,
       text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
@@ -307,7 +294,72 @@ function extractFileStatements(filePath) {
       endLine: child.endPosition.row + 1,
     });
   }
+  collectQueryStatements(tree.rootNode, source, statements);
   return statements;
 }
 
-module.exports = { extractFunctionsAndCalls, extractReferences, extractFileStatements };
+function collectQueryStatements(node, source, statements) {
+  const seen = new Set(statements.map(s => `${s.startLine}:${s.endLine}`));
+  traverse(node, (n) => {
+    if (n.type === "method_invocation") {
+      const nameNode = n.childForFieldName("name");
+      const objectNode = n.childForFieldName("object");
+      const methodName = nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null;
+      let objectName = null;
+      if (objectNode) {
+        let current = objectNode;
+        while (current && current.type === "method_invocation") {
+          const obj = current.childForFieldName("object");
+          if (obj) current = obj; else break;
+        }
+        objectName = current ? source.slice(current.startIndex, current.endIndex) : null;
+      }
+      if (methodName && isDbCallMethod(methodName)) {
+        const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          statements.push({
+            type: "query_statement", method: methodName, object: objectName,
+            text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
+            startLine: n.startPosition.row + 1, endLine: n.endPosition.row + 1,
+          });
+        }
+        return;
+      }
+    }
+    // SOQL/SOSL queries in Apex are often in brackets [SELECT ...] - check string literals too
+    if (n.type === "string_literal") {
+      const text = source.slice(n.startIndex, n.endIndex);
+      if (containsDbQuery(text)) {
+        let parent = n.parent;
+        while (parent && parent !== node && parent.type !== "local_variable_declaration" && parent.type !== "expression_statement") {
+          parent = parent.parent;
+        }
+        const contextNode = (parent && parent !== node) ? parent : n;
+        const key = `${contextNode.startPosition.row + 1}:${contextNode.endPosition.row + 1}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          statements.push({
+            type: "query_statement",
+            text: source.slice(contextNode.startIndex, contextNode.endIndex).slice(0, 500),
+            startLine: contextNode.startPosition.row + 1, endLine: contextNode.endPosition.row + 1,
+          });
+        }
+      }
+    }
+    // SOQL inline queries: [SELECT Id FROM Account]
+    if (n.type === "soql_expression" || n.type === "sosl_expression") {
+      const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        statements.push({
+          type: "query_statement",
+          text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
+          startLine: n.startPosition.row + 1, endLine: n.endPosition.row + 1,
+        });
+      }
+    }
+  });
+}
+
+module.exports = { extractFunctionsAndCalls, extractReferences, extractFileStatements, collectQueryStatements };

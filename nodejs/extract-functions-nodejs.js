@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, isDbCallMethod } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(JavaScript);
@@ -258,18 +258,6 @@ function extractDirectCalls(funcNode) {
 
 
 // ---------------------------------------------------------
-function isQueryStatement(node) {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const declarator = node.namedChild(i);
-    const nameNode = declarator.childForFieldName("name");
-    if (nameNode) {
-      const name = nameNode.text || "";
-      if (/query/i.test(name)) return true;
-    }
-  }
-  return false;
-}
-
 function unwrapExport(node) {
   if (node.type === "export_statement") {
     const decl = node.childForFieldName("declaration");
@@ -287,7 +275,6 @@ function extractStatements(node, source) {
     let child = body.namedChild(i);
     child = unwrapExport(child);
     if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && isQueryStatement(child)) continue;
     statements.push({
       type: child.type,
       text: (source ? source.slice(child.startIndex, child.endIndex) : child.text).slice(0, 200),
@@ -295,6 +282,10 @@ function extractStatements(node, source) {
       endLine: child.endPosition.row + 1,
     });
   }
+
+  // Detect query statements via deep traversal
+  collectQueryStatements(node, source, statements);
+
   return statements;
 }
 
@@ -449,7 +440,6 @@ function extractFileStatements(filePath) {
     let child = tree.rootNode.namedChild(i);
     child = unwrapExport(child);
     if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && isQueryStatement(child)) continue;
     statements.push({
       type: child.type,
       text: (source ? source.slice(child.startIndex, child.endIndex) : child.text).slice(0, 200),
@@ -457,7 +447,71 @@ function extractFileStatements(filePath) {
       endLine: child.endPosition.row + 1,
     });
   }
+
+  // Detect query statements via deep traversal
+  collectQueryStatements(tree.rootNode, source, statements);
+
   return statements;
 }
 
-module.exports = { extractFuncitonAndItsCalls, extractImports, extractFileStatements };
+// ---------------------------------------------------------
+// Query statement detection — pushes into statements array with type "query_statement"
+// Detects by: call targets (db.query, pool.execute, etc.) and raw query strings (SQL, Cypher, etc.)
+// ---------------------------------------------------------
+function collectQueryStatements(node, source, statements) {
+  const seen = new Set(statements.map(s => `${s.startLine}:${s.endLine}`));
+
+  traverse(node, (n) => {
+    // Call expressions with DB method names
+    if (n.type === "call_expression") {
+      const fn = n.childForFieldName("function");
+      if (!fn) return;
+
+      let methodName = null;
+      if (fn.type === "identifier") {
+        methodName = fn.text;
+      } else if (fn.type === "member_expression") {
+        const prop = fn.childForFieldName("property");
+        methodName = prop ? prop.text : null;
+      }
+
+      if (methodName && isDbCallMethod(methodName)) {
+        const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          statements.push({
+            type: "query_statement",
+            text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
+            startLine: n.startPosition.row + 1,
+            endLine: n.endPosition.row + 1,
+          });
+        }
+        return;
+      }
+    }
+
+    // String literals or template strings containing DB queries
+    if (n.type === "string" || n.type === "template_string") {
+      const text = source.slice(n.startIndex, n.endIndex);
+      if (containsDbQuery(text)) {
+        let parent = n.parent;
+        while (parent && parent !== node && parent.type !== "lexical_declaration" && parent.type !== "variable_declaration" && parent.type !== "expression_statement" && parent.type !== "assignment_expression") {
+          parent = parent.parent;
+        }
+        const contextNode = (parent && parent !== node) ? parent : n;
+        const key = `${contextNode.startPosition.row + 1}:${contextNode.endPosition.row + 1}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          statements.push({
+            type: "query_statement",
+            text: source.slice(contextNode.startIndex, contextNode.endIndex).slice(0, 500),
+            startLine: contextNode.startPosition.row + 1,
+            endLine: contextNode.endPosition.row + 1,
+          });
+        }
+      }
+    }
+  });
+}
+
+module.exports = { extractFuncitonAndItsCalls, extractImports, extractFileStatements, collectQueryStatements };

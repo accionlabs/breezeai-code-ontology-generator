@@ -3,6 +3,7 @@ const Apex = require("tree-sitter-sfapex");
 const fs = require("fs");
 const path = require("path");
 const { parseSource } = require("../utils");
+const { collectQueryStatements } = require("./extract-functions-salesforce");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(Apex.apex);
@@ -43,6 +44,7 @@ function extractClassStatements(node, source) {
       endLine: child.endPosition.row + 1,
     });
   }
+  collectQueryStatements(node, source, statements);
   return statements;
 }
 

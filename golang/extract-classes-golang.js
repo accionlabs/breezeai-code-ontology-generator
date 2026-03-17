@@ -3,6 +3,7 @@ const Go = require("tree-sitter-go");
 const fs = require("fs");
 const path = require("path");
 const { parseSource } = require("../utils");
+const { collectQueryStatements } = require("./extract-functions-golang");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(Go);
@@ -69,6 +70,7 @@ function extractClassStatements(typeNode, source) {
       }
     }
   }
+  collectQueryStatements(typeNode, source, statements);
   return statements;
 }
 

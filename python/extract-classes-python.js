@@ -2,6 +2,7 @@ const Parser = require("tree-sitter");
 const Python = require("tree-sitter-python");
 const fs = require("fs");
 const { parseSource } = require("../utils");
+const { collectQueryStatements } = require("./extract-functions-python");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(Python);
@@ -241,6 +242,9 @@ function extractClassStatements(node, source) {
       endLine: child.endPosition.row + 1,
     });
   }
+
+  collectQueryStatements(node, source, statements);
+
   return statements;
 }
 

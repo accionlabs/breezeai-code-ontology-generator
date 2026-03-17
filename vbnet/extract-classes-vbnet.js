@@ -2,6 +2,7 @@ const Parser = require("tree-sitter");
 const VBNet = require("tree-sitter-vb-dotnet");
 const fs = require("fs");
 const { parseSource } = require("../utils");
+const { collectQueryStatements } = require("./extract-functions-vbnet");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(VBNet);
@@ -62,6 +63,7 @@ function extractClassStatements(node, source) {
       });
     }
   }
+  collectQueryStatements(node, source, statements);
   return statements;
 }
 

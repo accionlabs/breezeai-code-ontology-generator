@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const CSharp = require("tree-sitter-c-sharp");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, isDbCallMethod } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(CSharp);
@@ -208,18 +208,6 @@ function extractCallInfo(node, source) {
   return null;
 }
 
-function isQueryStatement(node) {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const declarator = node.namedChild(i);
-    const nameNode = declarator.childForFieldName("name");
-    if (nameNode) {
-      const name = nameNode.text || "";
-      if (/query/i.test(name)) return true;
-    }
-  }
-  return false;
-}
-
 function extractStatements(node, source) {
   const body = node.childForFieldName("body");
   if (!body) return [];
@@ -228,7 +216,6 @@ function extractStatements(node, source) {
   for (let i = 0; i < body.namedChildCount; i++) {
     const child = body.namedChild(i);
     if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && isQueryStatement(child)) continue;
     statements.push({
       type: child.type,
       text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
@@ -236,6 +223,7 @@ function extractStatements(node, source) {
       endLine: child.endPosition.row + 1,
     });
   }
+  collectQueryStatements(node, source, statements);
   return statements;
 }
 
@@ -410,7 +398,6 @@ function extractFileStatements(filePath) {
   for (let i = 0; i < tree.rootNode.namedChildCount; i++) {
     const child = tree.rootNode.namedChild(i);
     if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if ((child.type === "lexical_declaration" || child.type === "variable_declaration") && isQueryStatement(child)) continue;
     statements.push({
       type: child.type,
       text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
@@ -418,7 +405,82 @@ function extractFileStatements(filePath) {
       endLine: child.endPosition.row + 1,
     });
   }
+  collectQueryStatements(tree.rootNode, source, statements);
   return statements;
 }
 
-module.exports = { extractFunctionsAndCalls, extractImports, extractFileStatements };
+function collectQueryStatements(node, source, statements) {
+  const seen = new Set();
+  for (const s of statements) {
+    seen.add(`${s.startLine}:${s.endLine}`);
+  }
+
+  traverse(node, (n) => {
+    // C# invocation: command.ExecuteReader(), context.Database.ExecuteSqlRaw()
+    if (n.type === "invocation_expression") {
+      const functionNode = n.child(0);
+      if (!functionNode) return;
+
+      let methodName = null;
+      let objectName = null;
+
+      if (functionNode.type === "identifier") {
+        methodName = source.slice(functionNode.startIndex, functionNode.endIndex);
+      } else if (functionNode.type === "member_access_expression") {
+        const nameNode = functionNode.childForFieldName("name");
+        let objectNode = functionNode.childForFieldName("expression");
+        methodName = nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null;
+        while (objectNode && objectNode.type === "invocation_expression") {
+          objectNode = objectNode.child(0);
+        }
+        while (objectNode && objectNode.type === "member_access_expression") {
+          const innerObj = objectNode.childForFieldName("expression");
+          if (!innerObj) break;
+          objectNode = innerObj;
+        }
+        objectName = objectNode ? source.slice(objectNode.startIndex, objectNode.endIndex) : null;
+      }
+
+      if (methodName && isDbCallMethod(methodName)) {
+        const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          statements.push({
+            type: "query_statement",
+            method: methodName,
+            object: objectName,
+            text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
+            startLine: n.startPosition.row + 1,
+            endLine: n.endPosition.row + 1,
+          });
+        }
+        return;
+      }
+    }
+
+    // String literals containing SQL
+    if (n.type === "string_literal" || n.type === "verbatim_string_literal" || n.type === "interpolated_string_expression" || n.type === "raw_string_literal") {
+      const text = source.slice(n.startIndex, n.endIndex);
+      if (containsDbQuery(text)) {
+        let parent = n.parent;
+        while (parent && parent !== node && parent.type !== "local_declaration_statement" && parent.type !== "expression_statement" && parent.type !== "assignment_expression") {
+          parent = parent.parent;
+        }
+        const contextNode = (parent && parent !== node) ? parent : n;
+        const key = `${contextNode.startPosition.row + 1}:${contextNode.endPosition.row + 1}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          statements.push({
+            type: "query_statement",
+            text: source.slice(contextNode.startIndex, contextNode.endIndex).slice(0, 500),
+            startLine: contextNode.startPosition.row + 1,
+            endLine: contextNode.endPosition.row + 1,
+          });
+        }
+      }
+    }
+
+  });
+}
+
+module.exports = { extractFunctionsAndCalls, extractImports, extractFileStatements, collectQueryStatements };

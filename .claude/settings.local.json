@@ -23,7 +23,10 @@
       "Bash(zcat:*)",
       "Bash(for lang:*)",
       "Bash(do echo:*)",
-      "Read(//mnt/c/Users/AnirudhaGohokar/Desktop/projects/breeze.ai/repositories/BREEZE.AI_WEBUI/**)"
+      "Read(//mnt/c/Users/AnirudhaGohokar/Desktop/projects/breeze.ai/repositories/BREEZE.AI_WEBUI/**)",
+      "Bash(node -e \"require\\(''./typescript/extract-functions-typescript''\\)\")",
+      "Bash(node -e \"require\\(''./python/extract-functions-python''\\)\")",
+      "Bash(node -e \"require\\(''./java/extract-functions-java''\\)\")"
     ]
   }
 }

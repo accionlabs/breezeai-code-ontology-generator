@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const VBNet = require("tree-sitter-vb-dotnet");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, isDbCallMethod } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(VBNet);
@@ -290,18 +290,6 @@ function getMemberAccessName(node, source) {
   return { name: memberName, object: objectName };
 }
 
-function isQueryStatement(node) {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const declarator = node.namedChild(i);
-    const nameNode = declarator.childForFieldName("name");
-    if (nameNode) {
-      const name = nameNode.text || "";
-      if (/query/i.test(name)) return true;
-    }
-  }
-  return false;
-}
-
 function extractStatements(node, source) {
   // VB.NET method_declaration has statements as direct children (no body field)
   const statements = [];
@@ -312,7 +300,6 @@ function extractStatements(node, source) {
       for (let j = 0; j < child.namedChildCount; j++) {
         const stmt = child.namedChild(j);
         if (!STATEMENT_TYPES.includes(stmt.type)) continue;
-        if (stmt.type === "dim_statement" && isQueryStatement(stmt)) continue;
         statements.push({
           type: stmt.type,
           text: source.slice(stmt.startIndex, stmt.endIndex).slice(0, 200),
@@ -323,7 +310,6 @@ function extractStatements(node, source) {
     }
     // Also check direct children matching statement types
     if (!STATEMENT_TYPES.includes(child.type)) continue;
-    if (child.type === "dim_statement" && isQueryStatement(child)) continue;
     statements.push({
       type: child.type,
       text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
@@ -331,6 +317,7 @@ function extractStatements(node, source) {
       endLine: child.endPosition.row + 1,
     });
   }
+  collectQueryStatements(node, source, statements);
   return statements;
 }
 
@@ -507,7 +494,6 @@ function extractFileStatements(filePath) {
     for (let i = 0; i < node.namedChildCount; i++) {
       const child = node.namedChild(i);
       if (STATEMENT_TYPES.includes(child.type)) {
-        if (child.type === "dim_statement" && isQueryStatement(child)) continue;
         statements.push({
           type: child.type,
           text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
@@ -530,7 +516,59 @@ function extractFileStatements(filePath) {
   }
 
   collectStatements(tree.rootNode);
+  collectQueryStatements(tree.rootNode, source, statements);
   return statements;
 }
 
-module.exports = { extractFunctionsAndCalls, extractImports, extractFileStatements };
+function collectQueryStatements(node, source, statements) {
+  const seen = new Set(statements.map(s => `${s.startLine}:${s.endLine}`));
+  traverse(node, (n) => {
+    if (n.type === "invocation_expression") {
+      const expr = n.child(0);
+      if (!expr) return;
+      let methodName = null;
+      let objectName = null;
+      if (expr.type === "identifier") {
+        methodName = source.slice(expr.startIndex, expr.endIndex);
+      } else if (expr.type === "member_access_expression") {
+        const lastChild = expr.child(expr.childCount - 1);
+        const firstChild = expr.child(0);
+        methodName = lastChild && lastChild.type === "identifier" ? source.slice(lastChild.startIndex, lastChild.endIndex) : null;
+        objectName = firstChild ? source.slice(firstChild.startIndex, firstChild.endIndex) : null;
+      }
+      if (methodName && isDbCallMethod(methodName)) {
+        const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          statements.push({
+            type: "query_statement", method: methodName, object: objectName,
+            text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
+            startLine: n.startPosition.row + 1, endLine: n.endPosition.row + 1,
+          });
+        }
+        return;
+      }
+    }
+    if (n.type === "string_literal") {
+      const text = source.slice(n.startIndex, n.endIndex);
+      if (containsDbQuery(text)) {
+        let parent = n.parent;
+        while (parent && parent !== node && parent.type !== "dim_statement" && parent.type !== "assignment_statement") {
+          parent = parent.parent;
+        }
+        const contextNode = (parent && parent !== node) ? parent : n;
+        const key = `${contextNode.startPosition.row + 1}:${contextNode.endPosition.row + 1}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          statements.push({
+            type: "query_statement",
+            text: source.slice(contextNode.startIndex, contextNode.endIndex).slice(0, 500),
+            startLine: contextNode.startPosition.row + 1, endLine: contextNode.endPosition.row + 1,
+          });
+        }
+      }
+    }
+  });
+}
+
+module.exports = { extractFunctionsAndCalls, extractImports, extractFileStatements, collectQueryStatements };
