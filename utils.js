@@ -114,16 +114,36 @@ const DB_CALL_METHODS = new Set([
   // Firebase / Firestore
   'getDocs', 'getDoc', 'setDoc', 'updateDoc', 'deleteDoc',
   'addDoc', 'onSnapshot',
+  // Entity Framework Core / LINQ (C#, VB.NET)
+  'ToListAsync', 'ToList', 'ToArrayAsync', 'ToArray',
+  'FirstOrDefaultAsync', 'FirstOrDefault', 'FirstAsync',
+  'SingleOrDefaultAsync', 'SingleOrDefault', 'SingleAsync',
+  'LastOrDefaultAsync', 'LastOrDefault',
+  'CountAsync', 'LongCountAsync', 'AnyAsync', 'AllAsync',
+  'MinAsync', 'MaxAsync', 'SumAsync', 'AverageAsync',
+  'FindAsync', 'AddAsync', 'AddRangeAsync',
+  'SaveChangesAsync', 'SaveChanges',
+  'Include', 'ThenInclude', 'AsNoTracking', 'AsTracking',
+  'FromSqlRaw', 'FromSqlInterpolated', 'ExecuteSqlRaw', 'ExecuteSqlInterpolated',
+  // Django ORM (Python)
+  'objects', 'filter', 'exclude', 'values', 'values_list',
+  'annotate', 'order_by', 'select_related', 'prefetch_related',
+  'get_or_create', 'update_or_create', 'bulk_update',
+  // SQLAlchemy (Python)
+  'session_query', 'add_all', 'flush', 'commit', 'rollback',
+  // ActiveRecord (Ruby-style, also used in some JS ORMs)
+  'where', 'includes', 'joins', 'preload', 'eager_load',
 ]);
 
 /** Database query language patterns */
 const QUERY_PATTERNS = [
   // SQL (MySQL, PostgreSQL, SQLite, MSSQL, Oracle)
   /\b(SELECT|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE|MERGE|TRUNCATE)\b/i,
-  // Neo4j Cypher
-  /\b(MATCH|CREATE|MERGE|DETACH\s+DELETE|OPTIONAL\s+MATCH|WITH|UNWIND|CALL)\s*\(/i,
-  /\b(MATCH|CREATE|MERGE)\s*\([a-zA-Z0-9_]*:/i,  // MATCH (n:Label), CREATE (n:Label)
-  /\b(RETURN|WHERE|SET|REMOVE|FOREACH|LOAD\s+CSV)\b/i,
+  // Neo4j Cypher — require graph-specific syntax context
+  /\b(MATCH|OPTIONAL\s+MATCH)\s*\(/i,                   // MATCH (...), OPTIONAL MATCH (...)
+  /\b(MATCH|CREATE|MERGE)\s*\([a-zA-Z0-9_]*:/i,         // MATCH (n:Label), CREATE (n:Label)
+  /\bDETACH\s+DELETE\b/i,                                // DETACH DELETE
+  /\bLOAD\s+CSV\b/i,                                     // LOAD CSV
   // MongoDB aggregation string patterns (e.g. in raw commands)
   /\$match|\$group|\$project|\$lookup|\$unwind|\$sort|\$limit|\$skip/,
   // GraphQL

@@ -93,6 +93,8 @@ demo/
 # BINARY / STATIC ASSETS
 ################################################
 
+wwwroot/
+public/assets/
 fonts/
 
 *.svg

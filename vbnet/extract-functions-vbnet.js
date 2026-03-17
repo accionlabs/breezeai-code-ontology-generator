@@ -523,14 +523,14 @@ function extractFileStatements(filePath) {
 function collectQueryStatements(node, source, statements) {
   const seen = new Set(statements.map(s => `${s.startLine}:${s.endLine}`));
   traverse(node, (n) => {
-    if (n.type === "invocation_expression") {
+    if (n.type === "invocation_expression" || n.type === "invocation") {
       const expr = n.child(0);
       if (!expr) return;
       let methodName = null;
       let objectName = null;
       if (expr.type === "identifier") {
         methodName = source.slice(expr.startIndex, expr.endIndex);
-      } else if (expr.type === "member_access_expression") {
+      } else if (expr.type === "member_access_expression" || expr.type === "member_access") {
         const lastChild = expr.child(expr.childCount - 1);
         const firstChild = expr.child(0);
         methodName = lastChild && lastChild.type === "identifier" ? source.slice(lastChild.startIndex, lastChild.endIndex) : null;

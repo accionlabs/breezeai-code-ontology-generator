@@ -8,3 +8,6 @@ My Project/
 # Designer files
 *.Designer.vb
 *.designer.vb
+
+# Static web assets
+wwwroot/

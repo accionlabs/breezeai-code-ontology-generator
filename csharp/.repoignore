@@ -9,11 +9,8 @@ packages/
 .nuget/
 
 
-# Web asset directories
-wwwroot/assets/global/plugins/
-wwwroot/lib/
-wwwroot/vendor/
-wwwroot/vendors/
+# Static web assets
+wwwroot/
 Scripts/bundles/
 
 # Generated/Auto-generated files
