@@ -98,6 +98,9 @@ function extractClassInfo(node, source, captureStatements = false) {
 
   const statements = captureStatements ? extractClassStatements(node, source) : [];
 
+  // Extract decorators from parent decorated_definition
+  const decorators = extractClassDecorators(node, source);
+
   // Match TypeScript format
   return {
     name,
@@ -106,12 +109,27 @@ function extractClassInfo(node, source, captureStatements = false) {
     isAbstract: false, // Python ABC checking would be complex, defaulting to false
     extends: superclasses.length > 0 ? superclasses[0] : null, // Python supports multiple inheritance, take first
     implements: [], // Python doesn't have interfaces like TypeScript
+    decorators,
     constructorParams,
     methods, // Now array of strings instead of objects
     statements,
     startLine,
     endLine
   };
+}
+
+function extractClassDecorators(node, source) {
+  const decorators = [];
+  const parent = node.parent;
+  if (parent && parent.type === "decorated_definition") {
+    for (let i = 0; i < parent.childCount; i++) {
+      const child = parent.child(i);
+      if (child.type === "decorator") {
+        decorators.push(source.slice(child.startIndex, child.endIndex));
+      }
+    }
+  }
+  return decorators;
 }
 
 function extractMethodInfo(node, source) {

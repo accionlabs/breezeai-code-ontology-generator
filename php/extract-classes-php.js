@@ -86,6 +86,7 @@ function extractClassInfo(node, filePath, repoPath = null, source, captureStatem
   } = extractClassMembers(node, source, typeKind);
 
   const { visibility, isAbstract, isFinal } = getClassModifiers(node, source);
+  const decorators = extractDecorators(node, source);
 
   const statements = captureStatements ? extractClassStatements(node, source) : [];
 
@@ -96,12 +97,30 @@ function extractClassInfo(node, filePath, repoPath = null, source, captureStatem
     isAbstract,
     extends: superClass,
     implements: interfaces,
+    decorators,
     constructorParams,
     methods,
     statements,
     startLine,
     endLine
   };
+}
+
+function extractDecorators(node, source) {
+  const decorators = [];
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child.type === "attribute_list") {
+      // Each attribute_list may contain multiple attribute_group nodes
+      for (let j = 0; j < child.childCount; j++) {
+        const group = child.child(j);
+        if (group.type === "attribute_group") {
+          decorators.push(source.slice(group.startIndex, group.endIndex));
+        }
+      }
+    }
+  }
+  return decorators;
 }
 
 function getTypeKind(node) {
