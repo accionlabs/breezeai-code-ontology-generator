@@ -7,7 +7,7 @@ const { truncateSourceCode, parseSource, readSource, containsDbQuery, getDbFromM
 const sharedParser = new Parser();
 sharedParser.setLanguage(Java);
 
-const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "enum_declaration"];
+const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "enum_declaration", "return_statement"];
 
 function extractFunctionsWithCalls(filePath, repoPath = null, classIndex = {}, captureSourceCode = false, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);
@@ -181,18 +181,40 @@ function extractStatements(node, source) {
   const statements = [];
   for (let i = 0; i < body.namedChildCount; i++) {
     const child = body.namedChild(i);
-    if (!STATEMENT_TYPES.includes(child.type)) continue;
-    statements.push({
-      type: child.type,
-      text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
-      startLine: child.startPosition.row + 1,
-      endLine: child.endPosition.row + 1,
-    });
+    if (STATEMENT_TYPES.includes(child.type)) {
+      statements.push({
+        type: child.type,
+        text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+        startLine: child.startPosition.row + 1,
+        endLine: child.endPosition.row + 1,
+      });
+    }
   }
+
+  // Collect return statements from nested blocks (if/else, loops, try/catch, etc.)
+  collectReturnStatements(body, source, statements, body);
 
   collectQueryStatements(node, source, statements);
 
   return statements;
+}
+
+function collectReturnStatements(node, source, statements, functionBody) {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child.type === "return_statement") {
+      // Skip if already captured as direct child of function body
+      if (child.parent === functionBody) continue;
+      statements.push({
+        type: child.type,
+        text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+        startLine: child.startPosition.row + 1,
+        endLine: child.endPosition.row + 1,
+      });
+    } else {
+      collectReturnStatements(child, source, statements, functionBody);
+    }
+  }
 }
 
 function traverse(node, cb) {
@@ -275,9 +297,9 @@ function isJavaStdLib(name) {
   );
 }
 
-function extractFunctionsAndCalls(filePath, repoPath, classIndex, captureSourceCode = false) {
+function extractFunctionsAndCalls(filePath, repoPath, classIndex, captureSourceCode = false, captureStatements = false) {
   try {
-    const functions = extractFunctionsWithCalls(filePath, repoPath, classIndex, captureSourceCode);
+    const functions = extractFunctionsWithCalls(filePath, repoPath, classIndex, captureSourceCode, captureStatements);
     const imports = extractImports(filePath, classIndex);
 
     // Build function and class map for call resolution

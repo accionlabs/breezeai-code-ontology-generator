@@ -7,7 +7,7 @@ const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod } = re
 const sharedParser = new Parser();
 sharedParser.setLanguage(VBNet);
 
-const STATEMENT_TYPES = ["dim_statement", "const_declaration", "field_declaration", "enum_block", "enum_member", "attribute_block"];
+const STATEMENT_TYPES = ["dim_statement", "const_declaration", "field_declaration", "enum_block", "enum_member", "attribute_block", "return_statement"];
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);
@@ -299,26 +299,51 @@ function extractStatements(node, source) {
     if (child.type === "statement") {
       for (let j = 0; j < child.namedChildCount; j++) {
         const stmt = child.namedChild(j);
-        if (!STATEMENT_TYPES.includes(stmt.type)) continue;
-        statements.push({
-          type: stmt.type,
-          text: source.slice(stmt.startIndex, stmt.endIndex).slice(0, 200),
-          startLine: stmt.startPosition.row + 1,
-          endLine: stmt.endPosition.row + 1,
-        });
+        if (STATEMENT_TYPES.includes(stmt.type)) {
+          statements.push({
+            type: stmt.type,
+            text: source.slice(stmt.startIndex, stmt.endIndex).slice(0, 200),
+            startLine: stmt.startPosition.row + 1,
+            endLine: stmt.endPosition.row + 1,
+          });
+        }
       }
     }
     // Also check direct children matching statement types
-    if (!STATEMENT_TYPES.includes(child.type)) continue;
-    statements.push({
-      type: child.type,
-      text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
-      startLine: child.startPosition.row + 1,
-      endLine: child.endPosition.row + 1,
-    });
+    if (STATEMENT_TYPES.includes(child.type)) {
+      statements.push({
+        type: child.type,
+        text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+        startLine: child.startPosition.row + 1,
+        endLine: child.endPosition.row + 1,
+      });
+    }
   }
+
+  // Collect return statements from nested blocks (If/Else, For, Try/Catch, etc.)
+  collectReturnStatements(node, source, statements, node);
+
   collectQueryStatements(node, source, statements);
   return statements;
+}
+
+function collectReturnStatements(node, source, statements, functionNode) {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child.type === "return_statement") {
+      // Skip if already captured as direct child of function node or via statement wrapper
+      if (child.parent === functionNode) continue;
+      if (child.parent && child.parent.type === "statement" && child.parent.parent === functionNode) continue;
+      statements.push({
+        type: child.type,
+        text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+        startLine: child.startPosition.row + 1,
+        endLine: child.endPosition.row + 1,
+      });
+    } else {
+      collectReturnStatements(child, source, statements, functionNode);
+    }
+  }
 }
 
 function traverse(node, cb) {
@@ -448,9 +473,9 @@ function resolveCallPath(call, index, currentFilePath) {
   return null;
 }
 
-function extractFunctionsAndCalls(filePath, repoPath, index = {}, captureSourceCode = false) {
+function extractFunctionsAndCalls(filePath, repoPath, index = {}, captureSourceCode = false, captureStatements = false) {
   try {
-    const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode);
+    const functions = extractFunctionsWithCalls(filePath, repoPath, captureSourceCode, captureStatements);
     const currentFilePath = path.relative(repoPath, filePath);
 
     const { classIndex = {}, fqcnIndex = {}, methodIndex = {}, varTypes = {} } = index;

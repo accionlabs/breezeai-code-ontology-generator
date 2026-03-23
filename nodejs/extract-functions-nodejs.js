@@ -7,7 +7,7 @@ const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod } = re
 const sharedParser = new Parser();
 sharedParser.setLanguage(JavaScript);
 
-const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition"];
+const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "return_statement"];
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);
@@ -274,19 +274,40 @@ function extractStatements(node, source) {
   for (let i = 0; i < body.namedChildCount; i++) {
     let child = body.namedChild(i);
     child = unwrapExport(child);
-    if (!STATEMENT_TYPES.includes(child.type)) continue;
-    statements.push({
-      type: child.type,
-      text: (source ? source.slice(child.startIndex, child.endIndex) : child.text).slice(0, 200),
-      startLine: child.startPosition.row + 1,
-      endLine: child.endPosition.row + 1,
-    });
+    if (STATEMENT_TYPES.includes(child.type)) {
+      statements.push({
+        type: child.type,
+        text: (source ? source.slice(child.startIndex, child.endIndex) : child.text).slice(0, 200),
+        startLine: child.startPosition.row + 1,
+        endLine: child.endPosition.row + 1,
+      });
+    }
   }
+
+  // Collect return statements from nested blocks (if/else, loops, try/catch, etc.)
+  collectReturnStatements(body, source, statements, body);
 
   // Detect query statements via deep traversal
   collectQueryStatements(node, source, statements);
 
   return statements;
+}
+
+function collectReturnStatements(node, source, statements, functionBody) {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child.type === "return_statement") {
+      if (child.parent === functionBody) continue;
+      statements.push({
+        type: child.type,
+        text: (source ? source.slice(child.startIndex, child.endIndex) : child.text).slice(0, 200),
+        startLine: child.startPosition.row + 1,
+        endLine: child.endPosition.row + 1,
+      });
+    } else {
+      collectReturnStatements(child, source, statements, functionBody);
+    }
+  }
 }
 
 function traverse(node, cb, parent = null) {

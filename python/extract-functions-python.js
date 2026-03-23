@@ -7,7 +7,7 @@ const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod } = re
 const sharedParser = new Parser();
 sharedParser.setLanguage(Python);
 
-const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition"];
+const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "return_statement"];
 
 function extractFunctionsWithCalls(filePath, repoPath, captureSourceCode = false, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);
@@ -251,18 +251,39 @@ function extractStatements(node, source) {
   const statements = [];
   for (let i = 0; i < body.namedChildCount; i++) {
     const child = body.namedChild(i);
-    if (!STATEMENT_TYPES.includes(child.type)) continue;
-    statements.push({
-      type: child.type,
-      text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
-      startLine: child.startPosition.row + 1,
-      endLine: child.endPosition.row + 1,
-    });
+    if (STATEMENT_TYPES.includes(child.type)) {
+      statements.push({
+        type: child.type,
+        text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+        startLine: child.startPosition.row + 1,
+        endLine: child.endPosition.row + 1,
+      });
+    }
   }
+
+  // Collect return statements from nested blocks (if/else, loops, try/except, etc.)
+  collectReturnStatements(body, source, statements, body);
 
   collectQueryStatements(node, source, statements);
 
   return statements;
+}
+
+function collectReturnStatements(node, source, statements, functionBody) {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child.type === "return_statement") {
+      if (child.parent === functionBody) continue;
+      statements.push({
+        type: child.type,
+        text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+        startLine: child.startPosition.row + 1,
+        endLine: child.endPosition.row + 1,
+      });
+    } else {
+      collectReturnStatements(child, source, statements, functionBody);
+    }
+  }
 }
 
 function traverse(node, cb) {
