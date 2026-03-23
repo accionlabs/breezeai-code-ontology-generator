@@ -219,11 +219,11 @@ async function uploadGeneratedFiles(outputDir, opts) {
   const baseurl = opts.baseurl;
 
   const jsonFiles = fs.readdirSync(outputDir)
-    .filter((f) => f.endsWith(".json"))
+    .filter((f) => f.endsWith("ndjson.gz"))
     .map((f) => path.join(outputDir, f));
 
   if (jsonFiles.length === 0) {
-    console.error("❌ No JSON files found in output directory to upload.");
+    console.error("❌ No .ndjson.gz files found in output directory to upload.");
     process.exit(1);
   }
 
