@@ -14,7 +14,7 @@ function extractClasses(filePath, repoPath = null, captureStatements = false) {
   const classes = [];
 
   traverse(tree.rootNode, (node) => {
-    if (node.type === "class_declaration" || node.type === "interface_declaration") {
+    if (node.type === "class_declaration" || node.type === "abstract_class_declaration" || node.type === "interface_declaration") {
       const classInfo = extractClassInfo(node, filePath, repoPath, source, captureStatements);
       if (classInfo?.name) {
         classes.push(classInfo);
@@ -65,11 +65,11 @@ function extractClassInfo(node, filePath, repoPath = null, source, captureStatem
   const superClass = getSuperClassName(node, source);
   const interfaces = getImplementedInterfaces(node, source);
   const isInterface = node.type === "interface_declaration";
+  const generics = extractClassGenerics(node, source);
 
   const {
     constructorParams,
     methods,
-    // properties
   } = extractClassMembers(node, source, isInterface);
 
   const statements = captureStatements ? extractClassStatements(node, source) : [];
@@ -80,15 +80,29 @@ function extractClassInfo(node, filePath, repoPath = null, source, captureStatem
     type: isInterface ? "interface" : "class",
     visibility,
     isAbstract,
+    generics,
     extends: superClass,
     implements: interfaces,
     constructorParams,
     methods,
     statements,
-    // properties,
     startLine,
     endLine
   };
+}
+
+function extractClassGenerics(node, source) {
+  const typeParams = node.childForFieldName("type_parameters");
+  if (typeParams) {
+    return source.slice(typeParams.startIndex, typeParams.endIndex);
+  }
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child.type === "type_parameters") {
+      return source.slice(child.startIndex, child.endIndex);
+    }
+  }
+  return null;
 }
 
 function getClassName(node, source) {
@@ -96,11 +110,19 @@ function getClassName(node, source) {
   return nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null;
 }
 
+function findHeritageNode(node) {
+  // class_heritage is not a named field, find it as a child
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child.type === "class_heritage") return child;
+  }
+  return null;
+}
+
 function getSuperClassName(node, source) {
-  const heritageNode = node.childForFieldName("heritage");
+  const heritageNode = findHeritageNode(node);
   if (!heritageNode) return null;
 
-  // Look for extends clause
   for (let i = 0; i < heritageNode.childCount; i++) {
     const child = heritageNode.child(i);
     if (child.type === "extends_clause") {
@@ -115,7 +137,7 @@ function getSuperClassName(node, source) {
 }
 
 function getImplementedInterfaces(node, source) {
-  const heritageNode = node.childForFieldName("heritage");
+  const heritageNode = findHeritageNode(node);
   if (!heritageNode) return [];
 
   const interfaces = [];
@@ -136,7 +158,7 @@ function getImplementedInterfaces(node, source) {
 
 function getClassModifiers(node, source) {
   let visibility = "public"; // TypeScript default
-  let isAbstract = false;
+  let isAbstract = node.type === "abstract_class_declaration";
 
   // Check for modifiers
   for (let i = 0; i < node.childCount; i++) {

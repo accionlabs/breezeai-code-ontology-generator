@@ -39,10 +39,16 @@ function extractFunctionInfo(node, filePath, repoPath = null, source = null, cap
   const name = getFunctionName(node);
   const params = extractFunctionParams(node);
   const calls = extractDirectCalls(node);
+  const jsdoc = parseJSDoc(node, source);
+  const returnType = jsdoc.returnType || null;
+
+  // Enrich params with JSDoc types
+  const enrichedParams = params.map(p => {
+    const jsdocParam = jsdoc.params.find(jp => jp.name === p);
+    return { name: p, type: jsdocParam ? jsdocParam.type : null };
+  });
 
   const { visibility, kind } = getFunctionModifiers(node);
-
-  // const relativePath = repoPath ? path.relative(repoPath, filePath) : filePath;
 
   const statements = captureStatements ? extractStatements(node, source) : [];
 
@@ -51,16 +57,58 @@ function extractFunctionInfo(node, filePath, repoPath = null, source = null, cap
     type: node.type,
     visibility,
     kind,
-    params,
+    params: enrichedParams,
+    returnType,
     startLine,
     endLine,
-    // path: relativePath,
     calls,
     statements
   };
 
   if (captureSourceCode && source) {
     result.sourceCode = truncateSourceCode(source.slice(node.startIndex, node.endIndex));
+  }
+
+  return result;
+}
+
+function parseJSDoc(node, source) {
+  const result = { params: [], returnType: null };
+  if (!source) return result;
+
+  // Find the comment node preceding this function
+  let target = node;
+  // If function is inside a variable_declarator, check parent's parent (the declaration)
+  if (node.parent && node.parent.type === "variable_declarator") {
+    target = node.parent.parent || node.parent;
+  }
+
+  // Look for a comment node right before the target
+  const parent = target.parent;
+  if (!parent) return result;
+
+  let prevSibling = null;
+  for (let i = 0; i < parent.childCount; i++) {
+    if (parent.child(i) === target) break;
+    prevSibling = parent.child(i);
+  }
+
+  if (!prevSibling || prevSibling.type !== "comment") return result;
+
+  const commentText = source.slice(prevSibling.startIndex, prevSibling.endIndex);
+  if (!commentText.startsWith("/**")) return result;
+
+  // Parse @param {type} name
+  const paramRegex = /@param\s+\{([^}]+)\}\s+(\w+)/g;
+  let match;
+  while ((match = paramRegex.exec(commentText)) !== null) {
+    result.params.push({ name: match[2], type: match[1] });
+  }
+
+  // Parse @returns {type} or @return {type}
+  const returnMatch = commentText.match(/@returns?\s+\{([^}]+)\}/);
+  if (returnMatch) {
+    result.returnType = returnMatch[1];
   }
 
   return result;
@@ -355,6 +403,21 @@ function extractImports(filePath) {
       }
     }
 
+    // Dynamic import: const foo = await import("./module") or import("./module")
+    if (node.type === "call_expression") {
+      const fn = node.childForFieldName("function");
+      if (fn && fn.type === "import") {
+        const args = node.childForFieldName("arguments");
+        if (args) {
+          const firstArg = args.namedChild(0);
+          if (firstArg && (firstArg.type === "string" || firstArg.type === "template_string")) {
+            const importSource = firstArg.text.replace(/['"` ]/g, "");
+            imports.push({ source: importSource, imported: [], dynamic: true });
+          }
+        }
+      }
+    }
+
     // CommonJS require: const { foo, bar } = require("./module")
     if (node.type === "variable_declarator") {
       const init = node.childForFieldName("value");
@@ -536,4 +599,55 @@ function collectQueryStatements(node, source, statements) {
   });
 }
 
-module.exports = { extractFuncitonAndItsCalls, extractImports, extractFileStatements, collectQueryStatements };
+function extractExports(filePath) {
+  const { source, tree } = parseSource(filePath, sharedParser);
+  const exports = [];
+
+  traverse(tree.rootNode, (node) => {
+    // module.exports = { foo, bar } or module.exports = Foo
+    if (node.type === "assignment_expression") {
+      const left = node.childForFieldName("left");
+      const right = node.childForFieldName("right");
+      if (!left || !right) return;
+
+      const leftText = left.text;
+
+      // module.exports = ...
+      if (leftText === "module.exports") {
+        if (right.type === "object") {
+          // module.exports = { foo, bar }
+          for (let i = 0; i < right.namedChildCount; i++) {
+            const prop = right.namedChild(i);
+            if (prop.type === "shorthand_property" || prop.type === "shorthand_property_identifier") {
+              exports.push({ name: prop.text, type: "module.exports" });
+            } else if (prop.type === "pair") {
+              const key = prop.childForFieldName("key");
+              if (key) exports.push({ name: key.text, type: "module.exports" });
+            }
+          }
+        } else if (right.type === "identifier") {
+          exports.push({ name: right.text, type: "module.exports" });
+        } else if (right.type === "class" || right.type === "function_expression") {
+          const nameNode = right.childForFieldName("name");
+          exports.push({ name: nameNode ? nameNode.text : "default", type: "module.exports" });
+        }
+      }
+
+      // exports.foo = ...
+      if (left.type === "member_expression") {
+        const obj = left.childForFieldName("object");
+        const prop = left.childForFieldName("property");
+        if (obj && obj.text === "exports" && prop) {
+          exports.push({ name: prop.text, type: "exports" });
+        }
+        if (obj && obj.text === "module" && prop && prop.text === "exports") {
+          // Already handled above for module.exports
+        }
+      }
+    }
+  });
+
+  return exports;
+}
+
+module.exports = { extractFuncitonAndItsCalls, extractImports, extractExports, extractFileStatements, collectQueryStatements };

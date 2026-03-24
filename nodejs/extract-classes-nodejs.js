@@ -22,6 +22,18 @@ function extractClasses(filePath, repoPath = null, captureStatements = false) {
       }
   });
 
+  // Detect prototype-based classes: Foo.prototype.bar = function() {}
+  const protoClasses = extractPrototypeClasses(tree.rootNode, source, captureStatements);
+  for (const pc of protoClasses) {
+    // Merge with existing class if constructor function was found, or add new
+    const existing = classes.find(c => c.name === pc.name);
+    if (existing) {
+      existing.methods = [...new Set([...existing.methods, ...pc.methods])];
+    } else {
+      classes.push(pc);
+    }
+  }
+
   return classes;
 }
 
@@ -227,6 +239,59 @@ function extractParamName(node) {
     default:
       return node.text;
   }
+}
+
+function extractPrototypeClasses(rootNode, source, captureStatements) {
+  const protoMap = new Map(); // className -> { methods, startLine, endLine }
+
+  traverse(rootNode, (node) => {
+    // Match: Foo.prototype.bar = function() {} or Foo.prototype.bar = () => {}
+    if (node.type === "assignment_expression") {
+      const left = node.childForFieldName("left");
+      const right = node.childForFieldName("right");
+      if (!left || !right || left.type !== "member_expression") return;
+
+      const leftText = left.text;
+      const protoMatch = leftText.match(/^(\w+)\.prototype\.(\w+)$/);
+      if (!protoMatch) return;
+
+      const className = protoMatch[1];
+      const methodName = protoMatch[2];
+
+      if (!protoMap.has(className)) {
+        protoMap.set(className, {
+          methods: [],
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1
+        });
+      }
+
+      const entry = protoMap.get(className);
+      entry.methods.push(methodName);
+      // Expand the range
+      entry.startLine = Math.min(entry.startLine, node.startPosition.row + 1);
+      entry.endLine = Math.max(entry.endLine, node.endPosition.row + 1);
+    }
+  });
+
+  const classes = [];
+  for (const [name, info] of protoMap) {
+    classes.push({
+      name,
+      type: "class",
+      visibility: "public",
+      isAbstract: false,
+      extends: null,
+      implements: [],
+      constructorParams: [],
+      methods: info.methods,
+      statements: [],
+      startLine: info.startLine,
+      endLine: info.endLine
+    });
+  }
+
+  return classes;
 }
 
 module.exports = { extractClasses }

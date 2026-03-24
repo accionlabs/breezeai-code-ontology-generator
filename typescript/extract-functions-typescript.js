@@ -8,7 +8,7 @@ const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod } = re
 const sharedParser = new Parser();
 sharedParser.setLanguage(TS);
 
-const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "enum_declaration", "return_statement"];
+const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "enum_declaration", "return_statement", "type_alias_declaration"];
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);
@@ -40,6 +40,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
   const name = getFunctionName(node, source);
   const params = extractFunctionParams(node, source);
   const calls = extractDirectCalls(node, source);
+  const returnType = extractReturnType(node, source);
+  const generics = extractGenerics(node, source);
 
   const { visibility, kind } = getFunctionModifiers(node, source);
 
@@ -51,6 +53,8 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
     visibility,
     kind,
     params,
+    returnType,
+    generics,
     startLine,
     endLine,
     calls,
@@ -163,39 +167,77 @@ function containsFunction(node) {
 function extractParamName(node, source) {
   switch (node.type) {
     case "required_parameter":
-    case "optional_parameter":
-      // Get the identifier, ignoring type annotations
+    case "optional_parameter": {
       const nameNode = node.childForFieldName("pattern");
+      const typeNode = node.childForFieldName("type");
+      const paramType = typeNode ? source.slice(typeNode.startIndex, typeNode.endIndex).replace(/^:\s*/, "") : null;
+      let paramName = null;
       if (nameNode) {
         if (nameNode.type === "identifier") {
-          return source.slice(nameNode.startIndex, nameNode.endIndex);
+          paramName = source.slice(nameNode.startIndex, nameNode.endIndex);
         } else if (nameNode.type === "object_pattern") {
-          return "{...}";
+          paramName = "{...}";
         } else if (nameNode.type === "array_pattern") {
-          return "[...]";
+          paramName = "[...]";
         }
       }
-      return null;
+      return paramName ? { name: paramName, type: paramType } : null;
+    }
 
     case "identifier":
-      return source.slice(node.startIndex, node.endIndex);
+      return { name: source.slice(node.startIndex, node.endIndex), type: null };
 
     case "object_pattern":
-      return "{...}";
+      return { name: "{...}", type: null };
 
     case "array_pattern":
-      return "[...]";
+      return { name: "[...]", type: null };
 
-    case "rest_pattern":
+    case "rest_pattern": {
       const restName = node.childForFieldName("pattern") || node.child(1);
+      const restType = node.childForFieldName("type");
+      const rType = restType ? source.slice(restType.startIndex, restType.endIndex).replace(/^:\s*/, "") : null;
       if (restName) {
-        return "..." + extractParamName(restName, source);
+        const inner = extractParamName(restName, source);
+        return { name: "..." + (inner?.name || inner || "args"), type: rType };
       }
-      return "...args";
+      return { name: "...args", type: rType };
+    }
 
     default:
       return null;
   }
+}
+
+function extractReturnType(node, source) {
+  // For method_definition / function_declaration, return type is a type_annotation child
+  const returnTypeNode = node.childForFieldName("return_type");
+  if (returnTypeNode) {
+    return source.slice(returnTypeNode.startIndex, returnTypeNode.endIndex).replace(/^:\s*/, "");
+  }
+  // Check for type_annotation after parameters
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child.type === "type_annotation") {
+      return source.slice(child.startIndex, child.endIndex).replace(/^:\s*/, "");
+    }
+  }
+  return null;
+}
+
+function extractGenerics(node, source) {
+  const typeParams = node.childForFieldName("type_parameters");
+  if (typeParams) {
+    return source.slice(typeParams.startIndex, typeParams.endIndex);
+  }
+  // Also check for type_parameters as direct child
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child.type === "type_parameters") {
+      return source.slice(child.startIndex, child.endIndex);
+    }
+  }
+  return null;
 }
 
 function getFunctionName(node, source) {
@@ -367,6 +409,21 @@ function extractImports(filePath) {
         }
 
         imports.push({ source: importSource, imported: importedNames });
+      }
+    }
+
+    // Dynamic import: const foo = await import("./module") or import("./module")
+    if (node.type === "call_expression") {
+      const fn = node.childForFieldName("function");
+      if (fn && fn.type === "import") {
+        const args = node.childForFieldName("arguments");
+        if (args) {
+          const firstArg = args.namedChild(0);
+          if (firstArg && (firstArg.type === "string" || firstArg.type === "template_string")) {
+            const importSource = source.slice(firstArg.startIndex, firstArg.endIndex).replace(/['"` ]/g, "");
+            imports.push({ source: importSource, imported: [], dynamic: true });
+          }
+        }
       }
     }
 
