@@ -120,12 +120,24 @@ function findHeritageNode(node) {
 }
 
 function getSuperClassName(node, source) {
+  // For classes: look inside class_heritage for extends_clause
   const heritageNode = findHeritageNode(node);
-  if (!heritageNode) return null;
+  if (heritageNode) {
+    for (let i = 0; i < heritageNode.childCount; i++) {
+      const child = heritageNode.child(i);
+      if (child.type === "extends_clause") {
+        const typeNode = child.namedChild(0);
+        if (typeNode) {
+          return source.slice(typeNode.startIndex, typeNode.endIndex);
+        }
+      }
+    }
+  }
 
-  for (let i = 0; i < heritageNode.childCount; i++) {
-    const child = heritageNode.child(i);
-    if (child.type === "extends_clause") {
+  // For interfaces: extends_type_clause is a direct child (not inside class_heritage)
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child.type === "extends_type_clause") {
       const typeNode = child.namedChild(0);
       if (typeNode) {
         return source.slice(typeNode.startIndex, typeNode.endIndex);
