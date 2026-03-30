@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const TS = require("tree-sitter-typescript").typescript;
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getApiCallInfo, extractEndpointFromArgs, API_BARE_FUNCTIONS } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getApiCallInfo, extractEndpointFromArgs, API_BARE_FUNCTIONS, getStatementTextLimit } = require("../utils");
 
 // Reuse a single parser instance across all files to reduce CPU/memory overhead
 const sharedParser = new Parser();
@@ -340,7 +340,7 @@ function extractStatements(node, source) {
     if (STATEMENT_TYPES.includes(child.type)) {
       statements.push({
         type: child.type,
-        text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+        text: source.slice(child.startIndex, child.endIndex).slice(0, getStatementTextLimit(child)),
         startLine: child.startPosition.row + 1,
         endLine: child.endPosition.row + 1,
       });
@@ -550,7 +550,7 @@ function extractFileStatements(filePath) {
     if (!STATEMENT_TYPES.includes(child.type)) continue;
     statements.push({
       type: child.type,
-      text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+      text: source.slice(child.startIndex, child.endIndex).slice(0, getStatementTextLimit(child)),
       startLine: child.startPosition.row + 1,
       endLine: child.endPosition.row + 1,
     });

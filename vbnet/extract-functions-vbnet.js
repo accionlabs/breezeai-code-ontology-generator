@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const VBNet = require("tree-sitter-vb-dotnet");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getStatementTextLimit } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(VBNet);
@@ -302,7 +302,7 @@ function extractStatements(node, source) {
         if (STATEMENT_TYPES.includes(stmt.type)) {
           statements.push({
             type: stmt.type,
-            text: source.slice(stmt.startIndex, stmt.endIndex).slice(0, 200),
+            text: source.slice(stmt.startIndex, stmt.endIndex).slice(0, getStatementTextLimit(stmt)),
             startLine: stmt.startPosition.row + 1,
             endLine: stmt.endPosition.row + 1,
           });
@@ -313,7 +313,7 @@ function extractStatements(node, source) {
     if (STATEMENT_TYPES.includes(child.type)) {
       statements.push({
         type: child.type,
-        text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+        text: source.slice(child.startIndex, child.endIndex).slice(0, getStatementTextLimit(child)),
         startLine: child.startPosition.row + 1,
         endLine: child.endPosition.row + 1,
       });
@@ -336,7 +336,7 @@ function collectReturnStatements(node, source, statements, functionNode) {
       if (child.parent && child.parent.type === "statement" && child.parent.parent === functionNode) continue;
       statements.push({
         type: child.type,
-        text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+        text: source.slice(child.startIndex, child.endIndex).slice(0, getStatementTextLimit(child)),
         startLine: child.startPosition.row + 1,
         endLine: child.endPosition.row + 1,
       });
@@ -521,7 +521,7 @@ function extractFileStatements(filePath) {
       if (STATEMENT_TYPES.includes(child.type)) {
         statements.push({
           type: child.type,
-          text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+          text: source.slice(child.startIndex, child.endIndex).slice(0, getStatementTextLimit(child)),
           startLine: child.startPosition.row + 1,
           endLine: child.endPosition.row + 1,
         });

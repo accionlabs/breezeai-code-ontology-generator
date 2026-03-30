@@ -294,8 +294,64 @@ function extractEndpointFromArgs(argsNode, source) {
   return null;
 }
 
+// -----------------------------------------------------------
+// Statement text limits
+// -----------------------------------------------------------
+
+/** Default text limit for statements */
+const STATEMENT_TEXT_LIMIT = 1000;
+
+/** Reduced limit for declarations that assign functions (already captured in functions[]) */
+const FUNCTION_DECL_TEXT_LIMIT = 200;
+
+/**
+ * Language-agnostic function assignment types.
+ * Each language maps its own AST node types to this check.
+ */
+const FUNCTION_NODE_TYPES = new Set([
+  // JavaScript / TypeScript
+  'arrow_function', 'function_expression', 'function',
+  // Python
+  'lambda',
+  // Go
+  'func_literal',
+  // PHP
+  'anonymous_function_creation_expression',
+  // Java / C# / Salesforce
+  'lambda_expression',
+]);
+
+/**
+ * Get the appropriate text truncation limit for a declaration node.
+ * Returns a smaller limit if the declaration assigns a function
+ * (since functions are already fully captured in the functions[] array).
+ * @param {object} node - The tree-sitter declaration node
+ * @returns {number} - Text truncation limit in characters
+ */
+function getStatementTextLimit(node) {
+  if (!node || !node.namedChildCount) return STATEMENT_TEXT_LIMIT;
+
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    // JS/TS: variable_declarator with value field
+    if (child.type === 'variable_declarator' || child.type === 'init_declarator') {
+      const value = child.childForFieldName('value') || child.childForFieldName('initializer');
+      if (value && FUNCTION_NODE_TYPES.has(value.type)) {
+        return FUNCTION_DECL_TEXT_LIMIT;
+      }
+    }
+    // Direct child is a function type (some languages)
+    if (FUNCTION_NODE_TYPES.has(child.type)) {
+      return FUNCTION_DECL_TEXT_LIMIT;
+    }
+  }
+
+  return STATEMENT_TEXT_LIMIT;
+}
+
 module.exports = {
   truncateSourceCode, readSource, parseSource,
   containsDbQuery, getDbFromMethod, DB_METHOD_MAP, QUERY_PATTERNS,
-  getApiCallInfo, extractEndpointFromArgs, API_CLIENT_NAMES, API_BARE_FUNCTIONS, HTTP_METHODS
+  getApiCallInfo, extractEndpointFromArgs, API_CLIENT_NAMES, API_BARE_FUNCTIONS, HTTP_METHODS,
+  getStatementTextLimit, STATEMENT_TEXT_LIMIT, FUNCTION_DECL_TEXT_LIMIT
 };

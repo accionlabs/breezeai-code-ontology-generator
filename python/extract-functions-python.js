@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const Python = require("tree-sitter-python");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getStatementTextLimit } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(Python);
@@ -254,7 +254,7 @@ function extractStatements(node, source) {
     if (STATEMENT_TYPES.includes(child.type)) {
       statements.push({
         type: child.type,
-        text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+        text: source.slice(child.startIndex, child.endIndex).slice(0, getStatementTextLimit(child)),
         startLine: child.startPosition.row + 1,
         endLine: child.endPosition.row + 1,
       });
@@ -345,7 +345,7 @@ function extractFileStatements(filePath) {
     if (!STATEMENT_TYPES.includes(child.type)) continue;
     statements.push({
       type: child.type,
-      text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+      text: source.slice(child.startIndex, child.endIndex).slice(0, getStatementTextLimit(child)),
       startLine: child.startPosition.row + 1,
       endLine: child.endPosition.row + 1,
     });

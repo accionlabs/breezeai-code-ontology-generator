@@ -9,7 +9,7 @@
 
 const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
-const { truncateSourceCode, containsDbQuery, getDbFromMethod, getApiCallInfo, extractEndpointFromArgs } = require("../utils");
+const { truncateSourceCode, containsDbQuery, getDbFromMethod, getApiCallInfo, extractEndpointFromArgs, getStatementTextLimit } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(JavaScript);
@@ -196,7 +196,7 @@ function extractStatements(node, source, lineOffset) {
     if (STATEMENT_TYPES.includes(child.type)) {
       statements.push({
         type: child.type,
-        text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+        text: source.slice(child.startIndex, child.endIndex).slice(0, getStatementTextLimit(child)),
         startLine: child.startPosition.row + 1 + lineOffset,
         endLine: child.endPosition.row + 1 + lineOffset,
       });
@@ -336,7 +336,7 @@ function extractFileStatementsFromSource(source, lineOffset) {
     if (!STATEMENT_TYPES.includes(child.type)) continue;
     statements.push({
       type: child.type,
-      text: source.slice(child.startIndex, child.endIndex).slice(0, 200),
+      text: source.slice(child.startIndex, child.endIndex).slice(0, getStatementTextLimit(child)),
       startLine: child.startPosition.row + 1 + lineOffset,
       endLine: child.endPosition.row + 1 + lineOffset,
     });
