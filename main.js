@@ -28,6 +28,7 @@ const { analyzePHPRepo } = require("./php/file-tree-mapper-php");
 const { analyzeVBNetRepo } = require("./vbnet/file-tree-mapper-vbnet");
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
 const { analyzeVueRepo } = require("./vue/file-tree-mapper-vue");
+const { analyzePerlRepo } = require("./perl/file-tree-mapper-perl");
 const {
   getIgnorePatterns,
   getIgnorePatternsWithPrefix,
@@ -105,6 +106,11 @@ const LANGUAGE_CONFIG = {
     analyzer: analyzeVueRepo,
     priority: 2, // Check before plain JavaScript so .vue files are detected
   },
+  perl: {
+    extensions: ["**/*.pl", "**/*.pm", "**/*.psgi", "**/*.t"],
+    name: "Perl",
+    analyzer: analyzePerlRepo,
+  },
 };
 
 // ----------------------------
@@ -179,10 +185,14 @@ async function processLanguage(language, repoPath, verbose = false, opts = {}) {
     console.log(`\n🚀 Processing ${language.name}...`);
 
     // Get language-specific ignore patterns (common + language-specific)
-    const ignorePatterns = getIgnorePatternsWithPrefix(repoPath, { language: language.key });
+    const ignorePatterns = getIgnorePatternsWithPrefix(repoPath, {
+      language: language.key,
+    });
 
     // Call the analyzer function with language-specific ignore patterns
-    const data = await Promise.resolve(language.analyzer(repoPath, { ...opts, ignorePatterns }));
+    const data = await Promise.resolve(
+      language.analyzer(repoPath, { ...opts, ignorePatterns }),
+    );
 
     console.log(`✅ ${language.name} analysis complete!`);
 
@@ -778,7 +788,10 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
     );
 
     // Step 2: Process each language in batches, streaming results to NDJSON
-    const ndjsonPath = path.join(outputDir, `${path.basename(repoPath)}-project-analysis.ndjson`);
+    const ndjsonPath = path.join(
+      outputDir,
+      `${path.basename(repoPath)}-project-analysis.ndjson`,
+    );
     // Clear any previous NDJSON file
     if (fs.existsSync(ndjsonPath)) fs.unlinkSync(ndjsonPath);
 
@@ -790,7 +803,7 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
     let totalLinesOfCode = 0;
     const languageFileCount = {};
     let languagesProcessed = 0;
-    let ndjsonFd = fs.openSync(ndjsonPath, 'a');
+    let ndjsonFd = fs.openSync(ndjsonPath, "a");
 
     for (const language of detectedLanguages) {
       try {
@@ -807,9 +820,10 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
           fileData.language = language.key;
           fileData.loc = loc;
 
-          fs.writeSync(ndjsonFd, JSON.stringify(fileData) + '\n');
+          fs.writeSync(ndjsonFd, JSON.stringify(fileData) + "\n");
           totalFiles++;
-          languageFileCount[language.key] = (languageFileCount[language.key] || 0) + 1;
+          languageFileCount[language.key] =
+            (languageFileCount[language.key] || 0) + 1;
 
           if (fileData.functions && Array.isArray(fileData.functions)) {
             totalFunctions += fileData.functions.length;
@@ -819,7 +833,9 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
           }
         };
 
-        await Promise.resolve(language.analyzer(repoPath, { ...opts, onResult }));
+        await Promise.resolve(
+          language.analyzer(repoPath, { ...opts, onResult }),
+        );
         analyzedLanguages.push(language.key);
         languagesProcessed++;
         console.log(`✅ ${language.name} analysis complete!`);
@@ -840,11 +856,27 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
     // Step 2.5: Process config files (always run - these are few root-level files)
     const configStats = {
       totalConfigFiles: 0,
-      byType: { json: 0, yaml: 0, docker: 0, env: 0, xml: 0, ini: 0, toml: 0, python: 0, gradle: 0, other: 0 },
+      byType: {
+        json: 0,
+        yaml: 0,
+        docker: 0,
+        env: 0,
+        xml: 0,
+        ini: 0,
+        toml: 0,
+        python: 0,
+        gradle: 0,
+        other: 0,
+      },
       packageManagers: [],
-      dockerInfo: { hasDockerfile: false, hasDockerCompose: false, services: [], exposedPorts: [] },
+      dockerInfo: {
+        hasDockerfile: false,
+        hasDockerCompose: false,
+        services: [],
+        exposedPorts: [],
+      },
       buildTools: [],
-      dependencies: { total: 0, production: 0, development: 0 }
+      dependencies: { total: 0, production: 0, development: 0 },
     };
 
     try {
@@ -855,55 +887,97 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
           const loc = countLinesOfCode(filePath);
           totalLinesOfCode += loc;
 
-          const baseFields = ["path", "fileName", "fileType", "size", "lines", "language"];
+          const baseFields = [
+            "path",
+            "fileName",
+            "fileType",
+            "size",
+            "lines",
+            "language",
+          ];
           const metadata = {};
-          Object.keys(file).forEach(key => {
+          Object.keys(file).forEach((key) => {
             if (!baseFields.includes(key)) {
               metadata[key] = file[key];
             }
           });
 
-          const configFileData = { path: file.path, type: "config", language: "config", loc, metadata };
-          fs.writeSync(ndjsonFd, JSON.stringify(configFileData) + '\n');
+          const configFileData = {
+            path: file.path,
+            type: "config",
+            language: "config",
+            loc,
+            metadata,
+          };
+          fs.writeSync(ndjsonFd, JSON.stringify(configFileData) + "\n");
           totalFiles++;
           configStats.totalConfigFiles++;
 
-          if (file.fileType && configStats.byType.hasOwnProperty(file.fileType)) {
+          if (
+            file.fileType &&
+            configStats.byType.hasOwnProperty(file.fileType)
+          ) {
             configStats.byType[file.fileType]++;
           }
           if (file.fileName === "package.json" && file.packageInfo) {
             configStats.packageManagers.push("npm");
-            if (file.packageInfo.dependencies) configStats.dependencies.production += file.packageInfo.dependencies.length;
-            if (file.packageInfo.devDependencies) configStats.dependencies.development += file.packageInfo.devDependencies.length;
-            configStats.dependencies.total = configStats.dependencies.production + configStats.dependencies.development;
+            if (file.packageInfo.dependencies)
+              configStats.dependencies.production +=
+                file.packageInfo.dependencies.length;
+            if (file.packageInfo.devDependencies)
+              configStats.dependencies.development +=
+                file.packageInfo.devDependencies.length;
+            configStats.dependencies.total =
+              configStats.dependencies.production +
+              configStats.dependencies.development;
           }
           if (file.fileType === "docker") {
             configStats.dockerInfo.hasDockerfile = true;
-            if (file.dockerInfo && file.dockerInfo.exposedPorts) configStats.dockerInfo.exposedPorts.push(...file.dockerInfo.exposedPorts);
+            if (file.dockerInfo && file.dockerInfo.exposedPorts)
+              configStats.dockerInfo.exposedPorts.push(
+                ...file.dockerInfo.exposedPorts,
+              );
           }
           if (file.fileName && file.fileName.includes("docker-compose")) {
             configStats.dockerInfo.hasDockerCompose = true;
-            if (file.dockerCompose && file.dockerCompose.services) configStats.dockerInfo.services.push(...file.dockerCompose.services);
-            if (file.dockerCompose && file.dockerCompose.exposedPorts) configStats.dockerInfo.exposedPorts.push(...file.dockerCompose.exposedPorts);
+            if (file.dockerCompose && file.dockerCompose.services)
+              configStats.dockerInfo.services.push(
+                ...file.dockerCompose.services,
+              );
+            if (file.dockerCompose && file.dockerCompose.exposedPorts)
+              configStats.dockerInfo.exposedPorts.push(
+                ...file.dockerCompose.exposedPorts,
+              );
           }
           if (file.fileName === "pom.xml") {
             configStats.packageManagers.push("maven");
             configStats.buildTools.push("maven");
-            if (file.mavenInfo && file.mavenInfo.dependencyCount) configStats.dependencies.total += file.mavenInfo.dependencyCount;
+            if (file.mavenInfo && file.mavenInfo.dependencyCount)
+              configStats.dependencies.total += file.mavenInfo.dependencyCount;
           }
-          if (file.fileName === "tsconfig.json") configStats.buildTools.push("typescript");
+          if (file.fileName === "tsconfig.json")
+            configStats.buildTools.push("typescript");
           if (file.fileType === "python") {
             if (file.fileName === "requirements.txt" && file.dependencyCount) {
               configStats.dependencies.total += file.dependencyCount;
-              if (!configStats.packageManagers.includes("pip")) configStats.packageManagers.push("pip");
+              if (!configStats.packageManagers.includes("pip"))
+                configStats.packageManagers.push("pip");
             }
-            if (file.fileName === "Pipfile" && !configStats.packageManagers.includes("pipenv")) configStats.packageManagers.push("pipenv");
-            if (file.fileName === "setup.py") configStats.buildTools.push("setuptools");
+            if (
+              file.fileName === "Pipfile" &&
+              !configStats.packageManagers.includes("pipenv")
+            )
+              configStats.packageManagers.push("pipenv");
+            if (file.fileName === "setup.py")
+              configStats.buildTools.push("setuptools");
           }
           if (file.fileType === "gradle") {
-            if (!configStats.packageManagers.includes("gradle")) configStats.packageManagers.push("gradle");
-            if (!configStats.buildTools.includes("gradle")) configStats.buildTools.push("gradle");
-            if (file.dependencyCount) configStats.dependencies.total += file.dependencyCount;
+            if (!configStats.packageManagers.includes("gradle"))
+              configStats.packageManagers.push("gradle");
+            if (!configStats.buildTools.includes("gradle"))
+              configStats.buildTools.push("gradle");
+            if (file.dependencyCount)
+              configStats.dependencies.total += file.dependencyCount;
           }
         }
       }
@@ -916,8 +990,12 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
     // Deduplicate config arrays
     configStats.packageManagers = [...new Set(configStats.packageManagers)];
     configStats.buildTools = [...new Set(configStats.buildTools)];
-    configStats.dockerInfo.services = [...new Set(configStats.dockerInfo.services)];
-    configStats.dockerInfo.exposedPorts = [...new Set(configStats.dockerInfo.exposedPorts)];
+    configStats.dockerInfo.services = [
+      ...new Set(configStats.dockerInfo.services),
+    ];
+    configStats.dockerInfo.exposedPorts = [
+      ...new Set(configStats.dockerInfo.exposedPorts),
+    ];
 
     // Add language file counts
     Object.entries(languageFileCount).forEach(([lang, count]) => {
@@ -934,42 +1012,45 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
       totalLinesOfCode,
       configs: configStats,
       generatedAt: new Date().toISOString(),
-      toolVersion: "1.0.0"
+      toolVersion: "1.0.0",
     };
 
     // Log summary
     console.log(`\n✅ Processing complete!`);
     console.log(`   - Languages: ${analyzedLanguages.join(", ")}`);
     console.log(`   - Total files: ${totalFiles}`);
-    console.log(`   - Code files: ${totalFiles - configStats.totalConfigFiles}`);
+    console.log(
+      `   - Code files: ${totalFiles - configStats.totalConfigFiles}`,
+    );
     console.log(`   - Config files: ${configStats.totalConfigFiles}`);
     console.log(`   - Total functions: ${totalFunctions}`);
     console.log(`   - Total classes: ${totalClasses}`);
     console.log(`   - Total lines of code: ${totalLinesOfCode}`);
 
     // Prepend projectMetaData using streaming (avoid reading entire file into memory)
-    const tmpPath = ndjsonPath + '.tmp';
-    const metaLine = JSON.stringify({ __type: "projectMetaData", ...projectMetaData }) + '\n';
+    const tmpPath = ndjsonPath + ".tmp";
+    const metaLine =
+      JSON.stringify({ __type: "projectMetaData", ...projectMetaData }) + "\n";
     await new Promise((resolve, reject) => {
       const ws = fs.createWriteStream(tmpPath);
       ws.write(metaLine);
       const rs = fs.createReadStream(ndjsonPath);
       rs.pipe(ws);
-      ws.on('finish', resolve);
-      ws.on('error', reject);
-      rs.on('error', reject);
+      ws.on("finish", resolve);
+      ws.on("error", reject);
+      rs.on("error", reject);
     });
     fs.renameSync(tmpPath, ndjsonPath);
 
     // Streaming gzip (avoid loading entire file into memory)
-    const gzipPath = ndjsonPath + '.gz';
+    const gzipPath = ndjsonPath + ".gz";
     await new Promise((resolve, reject) => {
       const input = fs.createReadStream(ndjsonPath);
       const gzip = zlib.createGzip();
       const output = fs.createWriteStream(gzipPath);
       input.pipe(gzip).pipe(output);
-      output.on('finish', resolve);
-      output.on('error', reject);
+      output.on("finish", resolve);
+      output.on("error", reject);
     });
 
     // Remove the uncompressed NDJSON file
