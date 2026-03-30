@@ -27,6 +27,7 @@ const {
 const { analyzePHPRepo } = require("./php/file-tree-mapper-php");
 const { analyzeVBNetRepo } = require("./vbnet/file-tree-mapper-vbnet");
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
+const { analyzeVueRepo } = require("./vue/file-tree-mapper-vue");
 const {
   getIgnorePatterns,
   getIgnorePatternsWithPrefix,
@@ -97,6 +98,12 @@ const LANGUAGE_CONFIG = {
     extensions: ["**/*.vb"],
     name: "VB.NET",
     analyzer: analyzeVBNetRepo,
+  },
+  vue: {
+    extensions: ["**/*.vue"],
+    name: "Vue",
+    analyzer: analyzeVueRepo,
+    priority: 2, // Check before plain JavaScript so .vue files are detected
   },
 };
 

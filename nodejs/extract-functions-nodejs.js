@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getApiCallInfo, extractEndpointFromArgs, API_BARE_FUNCTIONS } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(JavaScript);
@@ -338,6 +338,9 @@ function extractStatements(node, source) {
   // Detect query statements via deep traversal
   collectQueryStatements(node, source, statements);
 
+  // Detect API call statements (axios, fetch, etc.)
+  collectApiStatements(node, source, statements);
+
   return statements;
 }
 
@@ -532,8 +535,10 @@ function extractFileStatements(filePath) {
     });
   }
 
-  // Detect query statements via deep traversal
-  collectQueryStatements(tree.rootNode, source, statements);
+  // NOTE: query_statement and api_call are NOT collected here.
+  // They are already captured inside each function's and class's
+  // own statements via extractStatements() and extractClassStatements().
+  // Collecting them here would cause duplicates.
 
   return statements;
 }
@@ -544,6 +549,9 @@ function extractFileStatements(filePath) {
 // ---------------------------------------------------------
 function collectQueryStatements(node, source, statements) {
   const seen = new Set(statements.map(s => `${s.startLine}:${s.endLine}`));
+  // Track matched ranges so chained calls (e.g. this.getRepository().query())
+  // only produce one statement for the outermost match.
+  const matchedRanges = [];
 
   traverse(node, (n) => {
     // Call expressions with DB method names
@@ -561,9 +569,16 @@ function collectQueryStatements(node, source, statements) {
 
       const db = getDbFromMethod(methodName);
       if (db) {
+        // Skip if this call is nested inside an already-matched call expression
+        const isNested = matchedRanges.some(
+          r => n.startIndex >= r.start && n.endIndex <= r.end
+        );
+        if (isNested) return;
+
         const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
         if (!seen.has(key)) {
           seen.add(key);
+          matchedRanges.push({ start: n.startIndex, end: n.endIndex });
           statements.push({
             type: "query_statement", db,
             text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
@@ -596,6 +611,62 @@ function collectQueryStatements(node, source, statements) {
         }
       }
     }
+  });
+}
+
+// ---------------------------------------------------------
+// API call detection — detects HTTP client calls (axios, fetch, etc.)
+// and captures endpoint URL + HTTP method as api_call statements
+// ---------------------------------------------------------
+function collectApiStatements(node, source, statements) {
+  const seen = new Set(statements.map(s => `${s.startLine}:${s.endLine}`));
+  const matchedRanges = [];
+
+  traverse(node, (n) => {
+    if (n.type !== "call_expression") return;
+
+    const fn = n.childForFieldName("function");
+    if (!fn) return;
+
+    let objectName = null;
+    let methodName = null;
+
+    if (fn.type === "identifier") {
+      // Bare function call: fetch(url)
+      methodName = fn.text;
+    } else if (fn.type === "member_expression") {
+      // Method call: axios.get(url), this.$http.post(url)
+      const obj = fn.childForFieldName("object");
+      const prop = fn.childForFieldName("property");
+      objectName = obj ? obj.text : null;
+      methodName = prop ? prop.text : null;
+    }
+
+    const apiInfo = getApiCallInfo(objectName, methodName);
+    if (!apiInfo) return;
+
+    // Skip if nested inside an already-matched API call
+    const isNested = matchedRanges.some(
+      r => n.startIndex >= r.start && n.endIndex <= r.end
+    );
+    if (isNested) return;
+
+    const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    matchedRanges.push({ start: n.startIndex, end: n.endIndex });
+
+    const args = n.childForFieldName("arguments");
+    const endpoint = extractEndpointFromArgs(args, source);
+
+    statements.push({
+      type: "api_call",
+      method: apiInfo.httpMethod,
+      endpoint: endpoint,
+      text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
+      startLine: n.startPosition.row + 1,
+      endLine: n.endPosition.row + 1,
+    });
   });
 }
 
@@ -650,4 +721,4 @@ function extractExports(filePath) {
   return exports;
 }
 
-module.exports = { extractFuncitonAndItsCalls, extractImports, extractExports, extractFileStatements, collectQueryStatements };
+module.exports = { extractFuncitonAndItsCalls, extractImports, extractExports, extractFileStatements, collectQueryStatements, collectApiStatements };

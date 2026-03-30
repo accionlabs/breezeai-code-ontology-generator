@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const TS = require("tree-sitter-typescript").typescript;
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getApiCallInfo, extractEndpointFromArgs, API_BARE_FUNCTIONS } = require("../utils");
 
 // Reuse a single parser instance across all files to reduce CPU/memory overhead
 const sharedParser = new Parser();
@@ -351,6 +351,7 @@ function extractStatements(node, source) {
   collectReturnStatements(body, source, statements, body);
 
   collectQueryStatements(node, source, statements);
+  collectApiStatements(node, source, statements);
 
   return statements;
 }
@@ -555,13 +556,16 @@ function extractFileStatements(filePath) {
     });
   }
 
-  collectQueryStatements(tree.rootNode, source, statements);
+  // NOTE: query_statement and api_call are NOT collected here.
+  // They are already captured inside each function's and class's
+  // own statements. Collecting them here would cause duplicates.
 
   return statements;
 }
 
 function collectQueryStatements(node, source, statements) {
   const seen = new Set(statements.map(s => `${s.startLine}:${s.endLine}`));
+  const matchedRanges = [];
 
   traverse(node, (n) => {
     if (n.type === "call_expression") {
@@ -578,9 +582,16 @@ function collectQueryStatements(node, source, statements) {
 
       const db = getDbFromMethod(methodName);
       if (db) {
+        // Skip if nested inside an already-matched call expression
+        const isNested = matchedRanges.some(
+          r => n.startIndex >= r.start && n.endIndex <= r.end
+        );
+        if (isNested) return;
+
         const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
         if (!seen.has(key)) {
           seen.add(key);
+          matchedRanges.push({ start: n.startIndex, end: n.endIndex });
           statements.push({
             type: "query_statement", db,
             text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
@@ -615,4 +626,56 @@ function collectQueryStatements(node, source, statements) {
   });
 }
 
-module.exports = { extractFunctionsAndCalls, extractImports, extractFileStatements, collectQueryStatements };
+// ---------------------------------------------------------
+// API call detection — detects HTTP client calls (axios, fetch, etc.)
+// ---------------------------------------------------------
+function collectApiStatements(node, source, statements) {
+  const seen = new Set(statements.map(s => `${s.startLine}:${s.endLine}`));
+  const matchedRanges = [];
+
+  traverse(node, (n) => {
+    if (n.type !== "call_expression") return;
+
+    const fn = n.childForFieldName("function");
+    if (!fn) return;
+
+    let objectName = null;
+    let methodName = null;
+
+    if (fn.type === "identifier") {
+      methodName = source.slice(fn.startIndex, fn.endIndex);
+    } else if (fn.type === "member_expression") {
+      const obj = fn.childForFieldName("object");
+      const prop = fn.childForFieldName("property");
+      objectName = obj ? source.slice(obj.startIndex, obj.endIndex) : null;
+      methodName = prop ? source.slice(prop.startIndex, prop.endIndex) : null;
+    }
+
+    const apiInfo = getApiCallInfo(objectName, methodName);
+    if (!apiInfo) return;
+
+    const isNested = matchedRanges.some(
+      r => n.startIndex >= r.start && n.endIndex <= r.end
+    );
+    if (isNested) return;
+
+    const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    matchedRanges.push({ start: n.startIndex, end: n.endIndex });
+
+    const args = n.childForFieldName("arguments");
+    const endpoint = extractEndpointFromArgs(args, source);
+
+    statements.push({
+      type: "api_call",
+      method: apiInfo.httpMethod,
+      endpoint: endpoint,
+      text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
+      startLine: n.startPosition.row + 1,
+      endLine: n.endPosition.row + 1,
+    });
+  });
+}
+
+module.exports = { extractFunctionsAndCalls, extractImports, extractFileStatements, collectQueryStatements, collectApiStatements };

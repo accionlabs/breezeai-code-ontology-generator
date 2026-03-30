@@ -45,7 +45,9 @@ function extractClassStatements(node, source) {
     });
   }
 
-  collectQueryStatements(node, source, statements);
+  // NOTE: query_statement and api_call are NOT collected here.
+  // They are already captured inside each method's own statements.
+  // Collecting them here would cause duplicates.
 
   return statements;
 }

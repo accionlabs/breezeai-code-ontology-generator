@@ -395,7 +395,9 @@ function extractFileStatements(filePath) {
       endLine: child.endPosition.row + 1,
     });
   }
-  collectQueryStatements(tree.rootNode, source, statements);
+  // NOTE: query_statement and api_call are NOT collected here.
+  // They are already captured inside each function's own statements.
+  // Collecting them here would cause duplicates.
   return statements;
 }
 
@@ -404,6 +406,7 @@ function collectQueryStatements(node, source, statements) {
   for (const s of statements) {
     seen.add(`${s.startLine}:${s.endLine}`);
   }
+  const matchedRanges = [];
 
   traverse(node, (n) => {
     if (n.type === "call_expression") {
@@ -421,9 +424,15 @@ function collectQueryStatements(node, source, statements) {
       }
       const db = getDbFromMethod(methodName);
       if (db) {
+        const isNested = matchedRanges.some(
+          r => n.startIndex >= r.start && n.endIndex <= r.end
+        );
+        if (isNested) return;
+
         const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
         if (!seen.has(key)) {
           seen.add(key);
+          matchedRanges.push({ start: n.startIndex, end: n.endIndex });
           statements.push({
             type: "query_statement", db, method: methodName, object: objectName,
             text: source.slice(n.startIndex, n.endIndex).slice(0, 500),

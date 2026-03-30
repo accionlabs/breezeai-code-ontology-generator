@@ -203,7 +203,99 @@ function getDbFromMethod(methodName) {
   return METHOD_TO_DB.get(methodName) || null;
 }
 
+// -----------------------------------------------------------
+// API call detection patterns
+// -----------------------------------------------------------
+
+/** HTTP methods to detect */
+const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'request']);
+
+/** Known HTTP client object names — scoped matching to avoid false positives on generic .get()/.post() */
+const API_CLIENT_NAMES = new Set([
+  // JavaScript / TypeScript
+  'axios', '$axios', '$http', 'http', 'httpClient', 'HttpClient',
+  'api', 'apiClient', 'httpService', 'restClient',
+  // Angular
+  'this.http', 'this.$http', 'this.httpClient',
+  // Python
+  'requests', 'httpx', 'session', 'aiohttp',
+  // Go
+  'http', 'client',
+  // Java / Spring
+  'restTemplate', 'RestTemplate', 'webClient', 'WebClient',
+  // C# / .NET
+  'HttpClient', '_httpClient', '_client',
+  // PHP
+  'Http', 'Guzzle', '$client', '$http',
+  // Generic
+  'got', 'superagent', 'ky', 'ofetch', '$fetch', 'useFetch',
+]);
+
+/** Bare function names that are HTTP calls (not method calls on an object) */
+const API_BARE_FUNCTIONS = new Set(['fetch', '$fetch', 'useFetch', 'apiFetch', 'authFetch', 'customFetch']);
+
+/**
+ * Check if an object + method combination is an API call.
+ * @param {string|null} objectName - The object/caller (e.g. 'axios', 'this.$http')
+ * @param {string|null} methodName - The method (e.g. 'get', 'post')
+ * @returns {{ client: string, httpMethod: string } | null}
+ */
+function getApiCallInfo(objectName, methodName) {
+  if (!methodName) return null;
+
+  // Bare function calls: fetch(url), $fetch(url)
+  if (!objectName && API_BARE_FUNCTIONS.has(methodName)) {
+    return { client: methodName, httpMethod: 'GET' };
+  }
+
+  // Method calls: axios.get(), this.$http.post()
+  if (objectName && HTTP_METHODS.has(methodName.toLowerCase())) {
+    // Direct match: axios.get(), http.post()
+    if (API_CLIENT_NAMES.has(objectName)) {
+      return { client: objectName, httpMethod: methodName.toUpperCase() };
+    }
+    // Handle chained this.xxx calls: this.$axios.get(), this.http.post()
+    // tree-sitter gives us the full member expression text as objectName
+    const stripped = objectName.replace(/^this\./, '').replace(/^self\./, '');
+    if (API_CLIENT_NAMES.has(stripped)) {
+      return { client: stripped, httpMethod: methodName.toUpperCase() };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extract endpoint URL from the first argument of an API call.
+ * Handles string literals and template strings (static parts only).
+ * @param {object} argsNode - The tree-sitter arguments node
+ * @param {string} source - The full source text
+ * @returns {string|null} - The endpoint URL or null if not statically determinable
+ */
+function extractEndpointFromArgs(argsNode, source) {
+  if (!argsNode || argsNode.namedChildCount === 0) return null;
+
+  const firstArg = argsNode.namedChild(0);
+  if (!firstArg) return null;
+
+  const text = source.slice(firstArg.startIndex, firstArg.endIndex);
+
+  // String literal: '/api/users' or "/api/users"
+  if (firstArg.type === 'string' || firstArg.type === 'string_literal') {
+    return text.replace(/^['"`]|['"`]$/g, '');
+  }
+
+  // Template string: `/api/users/${id}`
+  if (firstArg.type === 'template_string') {
+    // Extract static parts, replace expressions with {param}
+    return text.replace(/^`|`$/g, '').replace(/\$\{[^}]*\}/g, '{param}');
+  }
+
+  return null;
+}
+
 module.exports = {
   truncateSourceCode, readSource, parseSource,
-  containsDbQuery, getDbFromMethod, DB_METHOD_MAP, QUERY_PATTERNS
+  containsDbQuery, getDbFromMethod, DB_METHOD_MAP, QUERY_PATTERNS,
+  getApiCallInfo, extractEndpointFromArgs, API_CLIENT_NAMES, API_BARE_FUNCTIONS, HTTP_METHODS
 };

@@ -7,7 +7,7 @@ const http = require("http");
 const url = require("url");
 const { autoDetectAndProcess, generateDescriptions, addMetadata } = require("./main");
 
-const allowedLanguages = ["perl", "javascript", "python", "java", "typescript", "php", "vbnet"];
+const allowedLanguages = ["perl", "javascript", "python", "java", "typescript", "php", "vbnet", "vue"];
 
 async function run(opts) {
   const language = (opts.language || "").toLowerCase();
@@ -57,6 +57,7 @@ async function run(opts) {
     typescript: "typescript/file-tree-mapper-typescript.js",
     php: "php/file-tree-mapper-php.js",
     vbnet: "vbnet/file-tree-mapper-vbnet.js",
+    vue: "vue/file-tree-mapper-vue.js",
   };
 
   if (language === "typescript") {

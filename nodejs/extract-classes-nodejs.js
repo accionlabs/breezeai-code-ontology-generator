@@ -4,7 +4,7 @@ const JavaScript = require("tree-sitter-javascript");
 const fs = require("fs");
 const path = require("path");
 const { parseSource } = require("../utils");
-const { collectQueryStatements } = require("./extract-functions-nodejs");
+const { collectQueryStatements, collectApiStatements } = require("./extract-functions-nodejs");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(JavaScript);
@@ -57,7 +57,9 @@ function extractClassStatements(node, source) {
     });
   }
 
-  collectQueryStatements(node, source, statements);
+  // NOTE: query_statement and api_call are NOT collected here.
+  // They are already captured inside each method's own statements.
+  // Collecting them here would cause duplicates.
 
   return statements;
 }
