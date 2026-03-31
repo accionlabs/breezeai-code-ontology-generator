@@ -266,6 +266,24 @@ function getApiCallInfo(objectName, methodName) {
 }
 
 /**
+ * Extract endpoint URL from a string or template_string AST node.
+ * @param {object} valueNode - A tree-sitter string or template_string node
+ * @param {string} source - The full source text
+ * @returns {string|null}
+ */
+function extractEndpointFromValueNode(valueNode, source) {
+  if (!valueNode) return null;
+  const text = source.slice(valueNode.startIndex, valueNode.endIndex);
+  if (valueNode.type === 'string' || valueNode.type === 'string_literal') {
+    return text.replace(/^['"`]|['"`]$/g, '');
+  }
+  if (valueNode.type === 'template_string') {
+    return text.replace(/^`|`$/g, '').replace(/\$\{[^}]*\}/g, '{param}');
+  }
+  return null;
+}
+
+/**
  * Extract endpoint URL from the first argument of an API call.
  * Handles string literals and template strings (static parts only).
  * @param {object} argsNode - The tree-sitter arguments node
@@ -278,19 +296,34 @@ function extractEndpointFromArgs(argsNode, source) {
   const firstArg = argsNode.namedChild(0);
   if (!firstArg) return null;
 
-  const text = source.slice(firstArg.startIndex, firstArg.endIndex);
+  return extractEndpointFromValueNode(firstArg, source);
+}
 
-  // String literal: '/api/users' or "/api/users"
-  if (firstArg.type === 'string' || firstArg.type === 'string_literal') {
-    return text.replace(/^['"`]|['"`]$/g, '');
+/**
+ * Extract the HTTP method override from a fetch-style options object.
+ * Handles: fetch(url, { method: "POST" }) or apiFetch(url, { method: "DELETE" })
+ * @param {object} argsNode - The tree-sitter arguments node
+ * @param {string} source - The full source text
+ * @returns {string|null} - Uppercase HTTP method or null if not found
+ */
+function extractMethodFromOptions(argsNode, source) {
+  if (!argsNode || argsNode.namedChildCount < 2) return null;
+  const optionsArg = argsNode.namedChild(1);
+  if (!optionsArg || optionsArg.type !== 'object') return null;
+  for (let i = 0; i < optionsArg.namedChildCount; i++) {
+    const prop = optionsArg.namedChild(i);
+    if (prop.type !== 'pair') continue;
+    const keyNode = prop.childForFieldName('key');
+    const valNode = prop.childForFieldName('value');
+    if (!keyNode || !valNode) continue;
+    const keyText = source.slice(keyNode.startIndex, keyNode.endIndex).replace(/['"]/g, '');
+    if (keyText === 'method') {
+      const valText = source.slice(valNode.startIndex, valNode.endIndex).replace(/['"]/g, '');
+      if (HTTP_METHODS.has(valText.toLowerCase())) {
+        return valText.toUpperCase();
+      }
+    }
   }
-
-  // Template string: `/api/users/${id}`
-  if (firstArg.type === 'template_string') {
-    // Extract static parts, replace expressions with {param}
-    return text.replace(/^`|`$/g, '').replace(/\$\{[^}]*\}/g, '{param}');
-  }
-
   return null;
 }
 
@@ -352,6 +385,7 @@ function getStatementTextLimit(node) {
 module.exports = {
   truncateSourceCode, readSource, parseSource,
   containsDbQuery, getDbFromMethod, DB_METHOD_MAP, QUERY_PATTERNS,
-  getApiCallInfo, extractEndpointFromArgs, API_CLIENT_NAMES, API_BARE_FUNCTIONS, HTTP_METHODS,
+  getApiCallInfo, extractEndpointFromArgs, extractEndpointFromValueNode, extractMethodFromOptions,
+  API_CLIENT_NAMES, API_BARE_FUNCTIONS, HTTP_METHODS,
   getStatementTextLimit, STATEMENT_TEXT_LIMIT, FUNCTION_DECL_TEXT_LIMIT
 };
