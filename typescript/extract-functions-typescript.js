@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const TS = require("tree-sitter-typescript").typescript;
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getApiCallInfo, extractEndpointFromArgs, API_BARE_FUNCTIONS, getStatementTextLimit } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getApiCallInfo, extractEndpointFromArgs, extractEndpointFromValueNode, extractMethodFromOptions, API_BARE_FUNCTIONS, getStatementTextLimit } = require("../utils");
 
 // Reuse a single parser instance across all files to reduce CPU/memory overhead
 const sharedParser = new Parser();
@@ -629,6 +629,30 @@ function collectQueryStatements(node, source, statements) {
 // ---------------------------------------------------------
 // API call detection — detects HTTP client calls (axios, fetch, etc.)
 // ---------------------------------------------------------
+
+/**
+ * Try to resolve the value of a variable by name within a scope node.
+ * Used to extract the URL when apiFetch(url, ...) stores the URL in a variable.
+ * @param {string} varName - The variable name to look up
+ * @param {object} scopeNode - The function/scope node to search within
+ * @param {string} source - The full source text
+ * @returns {string|null}
+ */
+function resolveVariableAsEndpoint(varName, scopeNode, source) {
+  let result = null;
+  traverse(scopeNode, (n) => {
+    if (result) return;
+    if (n.type === 'variable_declarator') {
+      const nameNode = n.childForFieldName('name');
+      if (nameNode && source.slice(nameNode.startIndex, nameNode.endIndex) === varName) {
+        const valueNode = n.childForFieldName('value');
+        result = extractEndpointFromValueNode(valueNode, source);
+      }
+    }
+  });
+  return result;
+}
+
 function collectApiStatements(node, source, statements) {
   const seen = new Set(statements.map(s => `${s.startLine}:${s.endLine}`));
   const matchedRanges = [];
@@ -665,11 +689,25 @@ function collectApiStatements(node, source, statements) {
     matchedRanges.push({ start: n.startIndex, end: n.endIndex });
 
     const args = n.childForFieldName("arguments");
-    const endpoint = extractEndpointFromArgs(args, source);
+
+    // Extract endpoint from the first argument
+    let endpoint = extractEndpointFromArgs(args, source);
+    // If the URL is stored in a variable (e.g. const url = `...`), resolve it
+    if (endpoint === null && args && args.namedChildCount > 0) {
+      const firstArg = args.namedChild(0);
+      if (firstArg && firstArg.type === 'identifier') {
+        const varName = source.slice(firstArg.startIndex, firstArg.endIndex);
+        endpoint = resolveVariableAsEndpoint(varName, node, source);
+      }
+    }
+
+    // For fetch-style calls, the HTTP method may be in the options object: fetch(url, { method: "POST" })
+    const optionsMethod = extractMethodFromOptions(args, source);
+    const httpMethod = optionsMethod || apiInfo.httpMethod;
 
     statements.push({
       type: "api_call",
-      method: apiInfo.httpMethod,
+      method: httpMethod,
       endpoint: endpoint,
       text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
       startLine: n.startPosition.row + 1,
