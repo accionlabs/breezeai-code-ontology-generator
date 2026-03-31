@@ -76,6 +76,8 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 
 ## ⚙️ CLI Options
 
+### Core options
+
 | Option | Description |
 |---|---|
 | `-r, --repo <path>` | **(required)** Path to the repository to analyze |
@@ -83,22 +85,39 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 | `-l, --language <name>` | Language to analyze (see table above). Omit for auto-detect |
 | `--capture-statements` | Capture in-body statements: declarations, returns, API calls, DB queries |
 | `--capture-source-code` | Include full source code text for each function |
+| `--verbose` | Show detailed processing information |
+
+### AI description & metadata options
+
+These only take effect when `--generate-descriptions` or `--add-metadata` is passed.
+
+| Option | Description |
+|---|---|
 | `--generate-descriptions` | Generate AI descriptions for files, classes, and functions |
 | `--add-metadata` | Add metadata using LLM analysis |
 | `--provider <name>` | LLM provider: `openai`, `claude`, `gemini`, `bedrock`, `custom` (default: `openai`) |
 | `--model <name>` | LLM model name |
 | `--api-url <url>` | Custom API endpoint (required for `custom` provider) |
-| `--aws-region <region>` | AWS region for Bedrock (default: `us-west-2`) |
-| `--aws-access-key <key>` | AWS access key ID for Bedrock |
-| `--aws-secret-key <key>` | AWS secret access key for Bedrock |
-| `--mode <low\|high>` | Accuracy mode for metadata generation (default: `low`) |
-| `--max-concurrent <num>` | Max concurrent LLM API requests |
+| `--mode <low\|high>` | Accuracy mode — only used with `--add-metadata` (default: `low`) |
+| `--max-concurrent <num>` | Max concurrent LLM API requests — used with `--generate-descriptions` and `--add-metadata` |
+
+When `--provider bedrock` is specified, the following AWS credentials are also required:
+
+| Option | Description |
+|---|---|
+| `--aws-region <region>` | AWS region (default: `us-west-2`) |
+| `--aws-access-key <key>` | AWS access key ID |
+| `--aws-secret-key <key>` | AWS secret access key |
+
+### Upload options
+
+| Option | Description |
+|---|---|
 | `--upload` | Upload the generated file to BreezeAI after processing |
 | `--baseurl <url>` | BreezeAI API base URL (required with `--upload`) |
 | `--uuid <uuid>` | Project UUID (required with `--upload`) |
 | `--user-api-key <key>` | BreezeAI API key for upload authentication |
 | `--llmPlatform <name>` | LLM platform: `OPENAI`, `AWSBEDROCK`, `GEMINI` (default: `AWSBEDROCK`) |
-| `--verbose` | Show detailed processing information |
 
 ---
 
