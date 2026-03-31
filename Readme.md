@@ -1,341 +1,328 @@
 # Breeze Code Ontology Generator
 
+A static analysis tool that parses source code repositories and produces a structured, compressed ontology describing files, functions, classes, imports, and statements. The output powers BreezeAI's semantic search, impact analysis, and functional graph generation.
+
 > **📖 For complete usage guide, see [USAGE.md](./USAGE.md)**
 
-## ⚡ Quick Start - Auto Language Detection (Recommended)
+---
 
-**NEW**: The tool now automatically detects all languages in your repository!
+## ⚡ Quick Start — Auto Language Detection (Recommended)
+
+The tool automatically detects all languages present in your repository:
 
 ```bash
-# Analyze a multi-language repository (auto-detects JavaScript, TypeScript, Python, Java)
-# Simply omit the --language flag to enable auto-detection
-npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+# Analyze a repository (auto-detects all supported languages)
+npx github:accionlabs/breezeai-code-ontology-generator repo-to-json-tree \
   --repo ./my-project \
   --out ./output
 
-# With AI descriptions
-npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+# With statement capture
+npx github:accionlabs/breezeai-code-ontology-generator repo-to-json-tree \
   --repo ./my-project \
   --out ./output \
-  --generate-descriptions \
-  --api-key sk-your-api-key
+  --capture-statements
 ```
 
 **What it does:**
 - 🔍 Automatically scans your repository
-- 🌐 Detects all supported languages independently (JavaScript, TypeScript, Python, Java)
-- 📊 Merges all outputs into a single `project-analysis.json` file
-- 🏷️ Adds `projectMetaData` with repository info and analyzed languages
+- 🌐 Detects all supported languages independently
+- 📊 Streams all file records into a single `.ndjson.gz` file
+- 🏷️ Appends a `projectMetaData` record with repository info and analyzed languages
 - 🚀 No need to specify `--language` manually
-- ⚡ Each language is detected and processed independently (TypeScript = `.ts/.tsx`, JavaScript = `.js/.jsx`)
-
-**Output Structure:**
-```json
-{
-  "projectMetaData": {
-    "repositoryPath": "/path/to/repo",
-    "repositoryName": "my-project",
-    "analyzedLanguages": ["typescript", "python"],
-    "totalFiles": 150,
-    "generatedAt": "2025-01-12T10:30:00.000Z",
-    "toolVersion": "1.0.0"
-  },
-  "files": [
-    // All analyzed files from all languages
-  ]
-}
-```
 
 ---
 
 ## 💡 Manual Language Mode
 
-You can still specify a single language to analyze:
+You can still target a single language:
 
 ```bash
 # Analyze only TypeScript files (.ts, .tsx)
 npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
   --language typescript \
   --repo ./my-project \
-  --out ./output
+  --out ./output \
+  --capture-statements
 
-# Analyze only JavaScript files (.js, .jsx)
+# Analyze only Python files (.py)
 npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
-  --language javascript \
+  --language python \
   --repo ./my-project \
-  --out ./output
+  --out ./output \
+  --capture-statements
 ```
-
-**Note:** In manual mode, the TypeScript parser will still process any `.js` files it encounters through imports, but the initial detection only looks for `.ts/.tsx` files.
 
 ---
 
-## 🧩 Overview
+## 🌐 Supported Languages
 
-The tool operates in **three stages**:
+| Language | `--language` value | File Extensions |
+|---|---|---|
+| TypeScript / TSX | `typescript` | `.ts`, `.tsx` |
+| JavaScript / JSX | `javascript` | `.js`, `.jsx` |
+| Python | `python` | `.py` |
+| Java | `java` | `.java` |
+| C# | `csharp` | `.cs` |
+| Go | `golang` | `.go` |
+| PHP | `php` | `.php` |
+| VB.NET | `vbnet` | `.vb` |
+| Vue | `vue` | `.vue` |
+| Salesforce Apex | `salesforce` | `.cls`, `.trigger` |
+| Config files | `config` | `.json`, `.yml`, `.yaml`, `Dockerfile`, `.env`, `.ini`, `.toml`, `.xml`, `.gradle`, `Makefile`, and more |
 
-1. **Code Parsing & JSON Generation**
-   Parses a Perl repository and outputs:
-   - A **package-to-path mapper JSON** — maps each Perl package to its corresponding file path.
-   - A **file dependency tree JSON** — captures which files import or depend on others.
+> Auto-detect mode processes all languages found in the repository in a single run.
 
-2. **AI-Powered File Descriptions** (Optional)
-   Generates natural language descriptions for each file using various LLM providers:
-   - Supports OpenAI, Claude (Anthropic), Google Gemini, and custom/private LLMs
-   - Adds descriptions to the dependency tree JSON
+---
 
-3. **Import JSON Using Breeze Code Ontology UI**
-  1. Create an Ontology
-   In the UI:Code Ontology → Create new Ontology
-   Provide:
-    Ontology Name
-    Programming Language
-    Optional metadata
-    This ontology will hold one or more repositories.
+## ⚙️ CLI Options
 
-  2. generate description (Optional)
-  This step will generate natural-language descriptions for your codebase using OpenAI.
-  The CLI will print a command that you can run locally to generate the description JSON file.
+| Option | Description |
+|---|---|
+| `-r, --repo <path>` | **(required)** Path to the repository to analyze |
+| `-o, --out <path>` | **(required)** Output directory for the generated `.ndjson.gz` file |
+| `-l, --language <name>` | Language to analyze (see table above). Omit for auto-detect |
+| `--capture-statements` | Capture in-body statements: declarations, returns, API calls, DB queries |
+| `--capture-source-code` | Include full source code text for each function |
+| `--generate-descriptions` | Generate AI descriptions for files, classes, and functions |
+| `--add-metadata` | Add metadata using LLM analysis |
+| `--provider <name>` | LLM provider: `openai`, `claude`, `gemini`, `bedrock`, `custom` (default: `openai`) |
+| `--model <name>` | LLM model name |
+| `--api-url <url>` | Custom API endpoint (required for `custom` provider) |
+| `--aws-region <region>` | AWS region for Bedrock (default: `us-west-2`) |
+| `--aws-access-key <key>` | AWS access key ID for Bedrock |
+| `--aws-secret-key <key>` | AWS secret access key for Bedrock |
+| `--mode <low\|high>` | Accuracy mode for metadata generation (default: `low`) |
+| `--max-concurrent <num>` | Max concurrent LLM API requests |
+| `--upload` | Upload the generated file to BreezeAI after processing |
+| `--baseurl <url>` | BreezeAI API base URL (required with `--upload`) |
+| `--uuid <uuid>` | Project UUID (required with `--upload`) |
+| `--user-api-key <key>` | BreezeAI API key for upload authentication |
+| `--llmPlatform <name>` | LLM platform: `OPENAI`, `AWSBEDROCK`, `GEMINI` (default: `AWSBEDROCK`) |
+| `--verbose` | Show detailed processing information |
 
-  3. Upload Generated JSON File
-    Open the ontology and click: Upload JSON File
-    Select your:file-dependency-tree.json
+---
 
-    Breeze will:
-        Parse the JSON
-        Create Neo4j nodes & relationships
-        Attach data under the ontology ID
-        Handle multiple repositories
-        Automatically manage indexing & constraints
+## 🧩 How It Works
 
-    Explore the Graph
-      Once imported, the UI enables:
-        Interactive graph visualization
-        Dependency traversal
-        Cluster/community analysis
-        Metrics & insights
-        Filtering by repo, file, module, dependencies
+1. **Code Parsing** — Each file is parsed using [tree-sitter](https://tree-sitter.github.io/) grammars for accurate AST-based analysis.
+2. **Extraction** — Functions, classes, imports, and (optionally) in-body statements are extracted per file.
+3. **Output** — Results are streamed as a gzipped NDJSON file (`.ndjson.gz`) — one JSON object per file, with a project metadata record appended at the end.
+
+### Output Structure
+
+```
+<output-dir>/
+└── <repo-name>-project-analysis.ndjson.gz   ← one JSON object per line, gzipped
+```
+
+**Per-file record:**
+```json
+{
+  "path": "src/services/user-service.ts",
+  "type": "code",
+  "language": "typescript",
+  "loc": 120,
+  "importFiles": ["src/lib/api-client.ts"],
+  "externalImports": ["react", "axios"],
+  "functions": [ ... ],
+  "classes": [ ... ],
+  "statements": [ ... ]
+}
+```
+
+**Function record:**
+```json
+{
+  "name": "getUser",
+  "type": "arrow_function",
+  "kind": "function",
+  "visibility": "public",
+  "params": [{ "name": "id", "type": "string" }],
+  "returnType": "Promise<User>",
+  "startLine": 10,
+  "endLine": 25,
+  "calls": ["apiFetch", "getAuthHeaders"],
+  "statements": [ ... ]
+}
+```
+
+**Project metadata record (last line):**
+```json
+{
+  "__type": "projectMetaData",
+  "repositoryName": "my-project",
+  "analyzedLanguages": ["typescript", "python"],
+  "totalFiles": 376,
+  "totalFunctions": 1582,
+  "totalClasses": 428,
+  "totalLinesOfCode": 98838,
+  "generatedAt": "2025-01-12T10:30:00.000Z",
+  "toolVersion": "1.0.0"
+}
+```
+
+---
+
+## 📋 Statements Captured (`--capture-statements`)
+
+When `--capture-statements` is enabled, each function and class body is analyzed for the following statement types.
+
+### 🔤 Variable & Type Declarations
+
+Captured from the direct body of functions and classes.
+
+| Statement Type | Description | Languages |
+|---|---|---|
+| `lexical_declaration` | `const` / `let` declarations | TypeScript, JavaScript, Java, C#, Go, PHP, Salesforce, Vue |
+| `variable_declaration` | `var` declarations | TypeScript, JavaScript, Java, C#, Go, PHP, Salesforce, Vue |
+| `public_field_definition` | Class field / property definitions | TypeScript, JavaScript, Java, C#, Go, PHP, Salesforce, Vue |
+| `enum_declaration` | Enum type declarations | TypeScript, Java, C#, PHP, Salesforce |
+| `type_alias_declaration` | TypeScript `type Foo = ...` aliases | TypeScript only |
+| `decorator` | Class/method decorators (`@Injectable`, etc.) | TypeScript only |
+| `dim_statement` | VB.NET `Dim` variable declarations | VB.NET only |
+| `const_declaration` | VB.NET `Const` declarations | VB.NET only |
+| `field_declaration` | Go struct fields / VB.NET field declarations | Go, VB.NET |
+| `attribute_block` | VB.NET attribute blocks | VB.NET only |
+
+### ↩️ Return Statements
+
+| Statement Type | Description |
+|---|---|
+| `return_statement` | Return statements, including those inside nested `if`/`else`, loops, and `try`/`catch` blocks |
+
+---
+
+### 🌐 API Call Statements (`api_call`)
+
+Detected by traversing the full function body for HTTP client calls.
+
+**Supported in:** TypeScript, JavaScript (Node.js), Vue
+
+```json
+{
+  "type": "api_call",
+  "method": "POST",
+  "endpoint": "{param}/projects/{param}",
+  "text": "apiFetch(url, { method: \"POST\", body: JSON.stringify(body), ... })",
+  "startLine": 23,
+  "endLine": 30
+}
+```
+
+| Field | Description | Example |
+|---|---|---|
+| `method` | HTTP verb | `GET`, `POST`, `PUT`, `DELETE`, `PATCH` |
+| `endpoint` | URL or URL template (dynamic segments → `{param}`) | `{param}/users/{param}` |
+| `text` | Raw call source (up to 500 chars) | `apiFetch(url, { method: "PUT", ... })` |
+| `startLine` / `endLine` | Line range in the source file | `23` / `30` |
+
+**HTTP method resolution order:**
+1. Options object `method` field — `apiFetch(url, { method: "POST" })` → `POST`
+2. Client method name — `axios.delete(url)` → `DELETE`
+3. Default `GET` for bare `fetch`-style calls with no explicit method
+
+**Endpoint resolution:**
+- String literal: `fetch('/api/users')` → `/api/users`
+- Template string: `` fetch(`/api/users/${id}`) `` → `/api/users/{param}`
+- Variable reference: `const url = \`...\`; apiFetch(url, ...)` → resolved from the variable declaration in the same function scope
+
+**Detected HTTP clients:**
+
+| Type | Examples |
+|---|---|
+| Bare functions | `fetch`, `apiFetch`, `authFetch`, `$fetch`, `useFetch`, `customFetch` |
+| Axios | `axios.get()`, `axios.post()`, `axios.put()`, `axios.delete()` |
+| Angular HttpClient | `this.http.get()`, `this.$http.post()`, `this.httpClient.request()` |
+| Generic clients | `api.get()`, `apiClient.post()`, `httpService.put()`, `restClient.delete()` |
+| Other libraries | `got`, `superagent`, `ky`, `ofetch` |
+| Python | `requests.get()`, `httpx.post()`, `session.put()` |
+| Java/Spring | `restTemplate.getForObject()`, `webClient.post()` |
+| C#/.NET | `HttpClient.GetAsync()`, `_httpClient.PostAsync()` |
+| PHP | `Http::get()`, `Guzzle::post()`, `$client->put()` |
+
+---
+
+### 🗄️ Database Query Statements (`query_statement`)
+
+Detected by traversing the full function body for DB client calls or raw query strings.
+
+**Supported in:** All languages
+
+```json
+{
+  "type": "query_statement",
+  "db": "sequelize",
+  "text": "User.findAll({ where: { id } })",
+  "startLine": 45,
+  "endLine": 47
+}
+```
+
+| Field | Description | Example |
+|---|---|---|
+| `db` | Database / ORM identified | `prisma`, `mongodb`, `redis`, `sequelize` |
+| `text` | Raw call expression or query string (up to 500 chars) | `User.findAll({ where: { active: true } })` |
+| `startLine` / `endLine` | Line range in the source file | `45` / `47` |
+
+**Detected databases and ORMs:**
+
+| Database / ORM | Detection Method | Key Methods / Patterns |
+|---|---|---|
+| **SQL (raw)** | String patterns | `SELECT`, `INSERT INTO`, `UPDATE ... SET`, `DELETE FROM`, `CREATE TABLE` |
+| **Sequelize** | Method names | `findAll`, `findOne`, `findByPk`, `findOrCreate`, `upsert`, `bulkCreate`, `destroy` |
+| **Prisma** | Method names | `findMany`, `findFirst`, `findUnique`, `create`, `update`, `delete`, `upsert` |
+| **TypeORM** | Method names | `createQueryBuilder`, `getRepository`, `save`, `findOneBy` |
+| **MongoDB** | Method names | `insertOne`, `updateOne`, `deleteOne`, `aggregate`, `findOneAndUpdate`, `bulkWrite` |
+| **Neo4j** | Method names | `readTransaction`, `writeTransaction`, `executeRead`, `executeWrite`, `run` |
+| **Redis** | Method names | `get`, `set`, `hget`, `hset`, `lpush`, `rpush`, `sadd`, `zadd`, `mset`, `mget` |
+| **DynamoDB** | Method names | `getItem`, `putItem`, `deleteItem`, `batchGetItem`, `transactWriteItems`, `scan`, `query` |
+| **Firebase** | Method names | `getDocs`, `getDoc`, `setDoc`, `addDoc`, `updateDoc`, `deleteDoc`, `onSnapshot` |
+| **Elasticsearch** | Method names | `search`, `index`, `bulk`, `msearch` |
+| **CouchDB** | Method names | `allDocs`, `bulkDocs`, `createIndex`, `find` |
+| **Entity Framework** | Method names | `ToListAsync`, `SaveChangesAsync`, `FromSqlRaw`, `ExecuteSqlRaw`, `Include`, `AddAsync` |
+| **Django ORM** | Method names | `filter`, `exclude`, `select_related`, `prefetch_related`, `get_or_create`, `bulk_update` |
+| **SQLAlchemy** | Method names | `query`, `add`, `add_all`, `execute` |
+| **Hibernate** | Method names | `findById`, `findAll`, `save`, `delete` |
+| **GraphQL** | String patterns | `query { }`, `mutation { }`, `subscription { }` |
+| **Cypher (Neo4j)** | String patterns | `MATCH`, `CREATE`, `MERGE`, `DETACH DELETE`, `LOAD CSV` |
+| **MongoDB DSL** | String patterns | `$match`, `$group`, `$lookup`, `$unwind`, `$project` |
+| **Elasticsearch DSL** | String patterns | `bool`, `must`, `should`, `match`, `term`, `range` |
+| **Salesforce SOQL** | AST node type | Inline `soql_expression` nodes (Salesforce only) |
+| **Salesforce SOSL** | AST node type | Inline `sosl_expression` nodes (Salesforce only) |
+
+---
+
+## 🚫 Ignore Patterns
+
+Files and directories are excluded from analysis via `.repoignore` files (same syntax as `.gitignore`):
+
+- **Built-in defaults** — `node_modules/`, `dist/`, `build/`, `.git/`, `*.min.js`, lock files, etc.
+- **Language defaults** — e.g. `.next/`, `.nuxt/` for TypeScript/JavaScript
+- **Repo-level overrides** — place a `.repoignore` file at the root of the target repository to add project-specific exclusions
+
+---
+
+## 🛠️ Other Commands
+
+### Upload documents
+
+```bash
+node cli.js upload-docs \
+  --path <docs-dir> \
+  --baseurl <api-url> \
+  --uuid <project-uuid> \
+  --user-api-key <key>
+```
+
+### Start HTTP server
+
+```bash
+node cli.js serve --port 3000
+```
 
 ---
 
 ## ⚙️ Prerequisites
 
 - **Node.js v20+**
-- **Neo4j Database** (local or remote)
-- A `config.json` file containing Neo4j credentials
-- Basic understanding of Perl package structure (`.pl` and `.pm` files)
-
----
-
-## 🗂️ Repository Structure
-
-```
-.
-├── config.js                         # Contains Neo4j connection details
-├── file-tree-mapper.js               # Script to analyze Perl repo and create JSONs
-├── generate-file-descriptions.js     # Script to add AI-generated descriptions
-├── tree-to-graph.js                  # Script to migrate dependency JSON into Neo4j
-├── package-lock.json
-├── README.md
-└── output/
-    ├── package-path-mapper.json
-    ├── file-dependency-tree.json
-    └── file-dependency-tree-with-descriptions.json
-```
-
----
-
-## ⚙️ Configuration Setup
-
-Before running the scripts, configure your Neo4j connection details in `config.js`:
-
-```json
-{ 
-    "dbConfig": {
-        "dbUrl": "neo4j://localhost:7687",
-        "username": "neo4j",
-        "password": "12345678",
-        "dbName": "codeviz"
-    }
-
-
-}
-```
-
-This file will be automatically read by `tree-to-graph.js` for database connection.
-
----
-
-## 🚀 Usage
-
-### Step 1: Generate the File Tree and Mapper JSONs
-
-Run the following command to analyze your Perl repository:
-
-```bash
-node file-tree-mapper.js <path-to-perl-repo> <output-mapper-json-filename> <output-file-tree-json>
-```
-
-**Example:**
-```bash
-node file-tree-mapper.js ./perl-app ./output/package-path-mapper.json ./output/file-dependency-tree.json
-```
-
-This will:
-- Recursively scan the Perl repository.
-- Identify `.pl` and `.pm` files.
-- Parse `package`, `use`, and `require` statements.
-- Generate:
-  - `package-path-mapper.json` — maps package names to file paths.
-  - `file-dependency-tree.json` — shows which files depend on which.
-
----
-
-### Step 2 (Optional): Generate AI Descriptions for Files
-
-You can enrich your file tree with AI-generated descriptions using various LLM providers. The script scans the repository directly and updates the JSON file in-place:
-
-#### Using OpenAI (GPT-4, GPT-3.5, etc.)
-
-```bash
-node generate-file-descriptions.js <repo-path> <tree-json-file> \
-  --provider openai \
-  --api-key sk-your-openai-key \
-  --model gpt-4o-mini
-```
-
-#### Using Claude (Anthropic)
-
-```bash
-node generate-file-descriptions.js <repo-path> <tree-json-file> \
-  --provider claude \
-  --api-key sk-ant-your-claude-key \
-  --model claude-3-5-sonnet-20241022
-```
-
-#### Using Google Gemini
-
-```bash
-node generate-file-descriptions.js <repo-path> <tree-json-file> \
-  --provider gemini \
-  --api-key your-gemini-key \
-  --model gemini-2.5-flash
-```
-
-#### Using Custom/Private LLM
-
-```bash
-node generate-file-descriptions.js <repo-path> <tree-json-file> \
-  --provider custom \
-  --api-key your-api-key \
-  --api-url http://localhost:8080/v1/chat/completions \
-  --model llama3.2
-```
-
-**Example:**
-```bash
-node generate-file-descriptions.js ./perl-app ./output/file-dependency-tree.json \
-  --provider openai \
-  --api-key sk-xxx \
-  --model gpt-4o-mini
-```
-
-**Available Options:**
-- `--provider`: LLM provider (openai, claude, gemini, custom)
-- `--api-key`: Your API key
-- `--model`: Model name (defaults: gpt-4o-mini, claude-3-5-sonnet-20241022, gemini-2.5-flash)
-- `--api-url`: Custom API endpoint (required for custom provider)
-- `--max-concurrent`: Maximum concurrent API requests (default: 5)
-- `--max-file-size`: Maximum file size in KB to process (default: 500)
-
-This will:
-- Scan the repository for Perl files (.pl and .pm)
-- Load existing JSON file (if it exists) to preserve metadata
-- Generate concise descriptions using the specified LLM
-- Add a `description` field to each file entry
-- Update the JSON file in-place (saves progress after each batch)
-- Skip files that already have descriptions
-
----
-
-### Step 3: Migrate the Dependency Tree to Neo4j
-
-Once the JSON is generated, run the graph migration command:
-
-```bash
-node tree-to-graph.js <path-to-file-dependency-tree-json>
-```
-
-**Example:**
-```bash
-node tree-to-graph.js ./output/file-dependency-tree.json
-```
-
-This script will:
-- Read Neo4j credentials from `config/config.json`.
-- Connect to your Neo4j database.
-- Create `File` nodes and `IMPORTS` relationships.
-- Populate the graph for exploration.
-
----
-
-## 🧠 Example Neo4j Queries
-
-View all file relationships:
-
-```cypher
-MATCH (f:File)-[:IMPORTS]->(d:File)
-RETURN f, d
-```
-
-List files that are not imported by any other file:
-
-```cypher
-MATCH (f:File)
-WHERE NOT ()-[:IMPORTS]->(f)
-RETURN f
-```
-
----
-
-## 🧱 Data Model
-
-**Node Labels:**
-- `File` — represents a `.pl` or `.pm` file.
-
-**Relationships:**
-- `[:IMPORTS]` — indicates one file depends on another.
-
----
-
-## ⚠️ Notes
-
-- Ensure the Neo4j database is running before executing the migration script.
-- Update credentials in `config/config.json` instead of editing scripts.
-- The parser assumes standard Perl module naming conventions (`Package::SubPackage → Package/SubPackage.pm`).
-
-
-## Generating local connected grraphs community
-
-Run these queries in neo4jDB
-
-// Drop any existing graph with the same name to avoid conflict
-CALL gds.graph.drop('importsGraph', false) YIELD graphName;
-
-// Create a new graph projection
-CALL gds.graph.project(
-  'importsGraph',
-  'File',                   // node label
-  {
-    IMPORTS: {
-      type: 'IMPORTS',
-      orientation: 'UNDIRECTED' // Louvain works best on undirected graphs
-    }
-  }
-);
-
-CALL gds.louvain.write('importsGraph', {
-  writeProperty: 'communityId'
-})
-YIELD communityCount, modularity, modularities;
-
+- `npm install` to install tree-sitter grammars and other dependencies
