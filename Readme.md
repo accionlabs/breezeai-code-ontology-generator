@@ -6,6 +6,13 @@ A static analysis tool that parses source code repositories and produces a struc
 
 ---
 
+## ⚙️ Prerequisites
+
+- **Node.js v18+**
+- Run `npm install` after cloning — a postinstall script rebuilds native tree-sitter grammars
+
+---
+
 ## ⚡ Quick Start — Auto Language Detection (Recommended)
 
 The tool automatically detects all languages present in your repository:
@@ -16,7 +23,7 @@ npx github:accionlabs/breezeai-code-ontology-generator repo-to-json-tree \
   --repo ./my-project \
   --out ./output
 
-# With statement capture
+# With statement capture (API calls, DB queries, declarations)
 npx github:accionlabs/breezeai-code-ontology-generator repo-to-json-tree \
   --repo ./my-project \
   --out ./output \
@@ -24,53 +31,57 @@ npx github:accionlabs/breezeai-code-ontology-generator repo-to-json-tree \
 ```
 
 **What it does:**
-- 🔍 Automatically scans your repository
-- 🌐 Detects all supported languages independently
-- 📊 Streams all file records into a single `.ndjson.gz` file
-- 🏷️ Appends a `projectMetaData` record with repository info and analyzed languages
+- 🔍 Automatically scans and detects all supported languages independently
+- 📊 Streams all file records into a single `<repo-name>-project-analysis.ndjson.gz`
+- 🏷️ Appends a `projectMetaData` record with repository info, language stats, and config summary
 - 🚀 No need to specify `--language` manually
 
 ---
 
 ## 💡 Manual Language Mode
 
-You can still target a single language:
+Target a single language explicitly:
 
 ```bash
-# Analyze only TypeScript files (.ts, .tsx)
-npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+# Analyze only TypeScript files (.ts, .tsx) — also processes .js/.jsx via TypeScript parser
+npx github:accionlabs/breezeai-code-ontology-generator repo-to-json-tree \
   --language typescript \
   --repo ./my-project \
   --out ./output \
   --capture-statements
 
-# Analyze only Python files (.py)
-npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
+# Analyze only Python files
+npx github:accionlabs/breezeai-code-ontology-generator repo-to-json-tree \
   --language python \
   --repo ./my-project \
   --out ./output \
   --capture-statements
 ```
 
+> **Note:** In manual mode the output file is named `<language>-imports.ndjson.gz`. In auto-detect mode it is `<repo-name>-project-analysis.ndjson.gz`.
+
 ---
 
 ## 🌐 Supported Languages
 
-| Language | `--language` value | File Extensions |
-|---|---|---|
-| TypeScript / TSX | `typescript` | `.ts`, `.tsx` |
-| JavaScript / JSX | `javascript` | `.js`, `.jsx` |
-| Python | `python` | `.py` |
-| Java | `java` | `.java` |
-| C# | `csharp` | `.cs` |
-| Go | `golang` | `.go` |
-| PHP | `php` | `.php` |
-| VB.NET | `vbnet` | `.vb` |
-| Vue | `vue` | `.vue` |
-| Salesforce Apex | `salesforce` | `.cls`, `.trigger` |
-| Config files | `config` | `.json`, `.yml`, `.yaml`, `Dockerfile`, `.env`, `.ini`, `.toml`, `.xml`, `.gradle`, `Makefile`, and more |
+| Language | `--language` value | File Extensions | Auto-detect only |
+|---|---|---|---|
+| TypeScript / TSX | `typescript` | `.ts`, `.tsx` (+ `.js`, `.jsx`) | No |
+| JavaScript / JSX | `javascript` | `.js`, `.jsx` | No |
+| Python | `python` | `.py` | No |
+| Java | `java` | `.java` | No |
+| C# | `csharp` | `.cs` | **Yes** |
+| Go | `golang` | `.go` | **Yes** |
+| PHP | `php` | `.php` | No |
+| VB.NET | `vbnet` | `.vb` | No |
+| Vue | `vue` | `.vue` | **Yes** |
+| Salesforce Apex | `salesforce` | `.cls`, `.trigger` | **Yes** |
+| Perl | `perl` | `.pl`, `.pm` | No |
+| Config files | `config` | `.json`, `.yml`, `.yaml`, `Dockerfile`, `.env`, `.ini`, `.toml`, `.xml`, `.gradle`, `Makefile`, and more | **Yes** |
 
-> Auto-detect mode processes all languages found in the repository in a single run.
+> Languages marked **Auto-detect only** are not available via `--language`. They are processed automatically when detected in the repository.
+
+> **TypeScript note:** When `--language typescript` is used, the TypeScript parser also processes any `.js` and `.jsx` files it encounters through imports.
 
 ---
 
@@ -84,7 +95,7 @@ npx github:accionlabs/breeze-code-ontology-generator repo-to-json-tree \
 | `-o, --out <path>` | **(required)** Output directory for the generated `.ndjson.gz` file |
 | `-l, --language <name>` | Language to analyze (see table above). Omit for auto-detect |
 | `--capture-statements` | Capture in-body statements: declarations, returns, API calls, DB queries |
-| `--capture-source-code` | Include full source code text for each function |
+| `--capture-source-code` | Include source code text for each function (truncated to 200 lines / 10,000 chars) |
 | `--verbose` | Show detailed processing information |
 
 ### AI description & metadata options
@@ -93,13 +104,15 @@ These only take effect when `--generate-descriptions` or `--add-metadata` is pas
 
 | Option | Description |
 |---|---|
-| `--generate-descriptions` | Generate AI descriptions for files, classes, and functions |
-| `--add-metadata` | Add metadata using LLM analysis |
+| `--generate-descriptions` | Generate AI descriptions for files, classes, and functions (resume-safe) |
+| `--add-metadata` | Add role/metadata tags using LLM analysis (resume-safe, saves every 10 files) |
 | `--provider <name>` | LLM provider: `openai`, `claude`, `gemini`, `bedrock`, `custom` (default: `openai`) |
-| `--model <name>` | LLM model name |
+| `--model <name>` | LLM model name (defaults: `gpt-4o-mini` / `claude-3-5-sonnet-20241022` / `gemini-2.5-flash`) |
 | `--api-url <url>` | Custom API endpoint (required for `custom` provider) |
 | `--mode <low\|high>` | Accuracy mode — only used with `--add-metadata` (default: `low`) |
 | `--max-concurrent <num>` | Max concurrent LLM API requests — used with `--generate-descriptions` and `--add-metadata` |
+| `--max-file-size <kb>` | Max file size to process for descriptions (default: 500 KB) |
+| `--node-types <types>` | Comma-separated node types for metadata: `file`, `class`, `function` |
 
 When `--provider bedrock` is specified, the following AWS credentials are also required:
 
@@ -113,7 +126,7 @@ When `--provider bedrock` is specified, the following AWS credentials are also r
 
 | Option | Description |
 |---|---|
-| `--upload` | Upload the generated file to BreezeAI after processing |
+| `--upload` | Upload the generated `.ndjson.gz` to BreezeAI after processing |
 | `--baseurl <url>` | BreezeAI API base URL (required with `--upload`) |
 | `--uuid <uuid>` | Project UUID (required with `--upload`) |
 | `--user-api-key <key>` | BreezeAI API key for upload authentication |
@@ -125,16 +138,18 @@ When `--provider bedrock` is specified, the following AWS credentials are also r
 
 1. **Code Parsing** — Each file is parsed using [tree-sitter](https://tree-sitter.github.io/) grammars for accurate AST-based analysis.
 2. **Extraction** — Functions, classes, imports, and (optionally) in-body statements are extracted per file.
-3. **Output** — Results are streamed as a gzipped NDJSON file (`.ndjson.gz`) — one JSON object per file, with a project metadata record appended at the end.
+3. **Streaming Output** — Results are streamed to a gzipped NDJSON file as they are produced — the full dataset is never held in memory. A `projectMetaData` record is appended last.
 
-### Output Structure
+### Output structure
 
 ```
 <output-dir>/
-└── <repo-name>-project-analysis.ndjson.gz   ← one JSON object per line, gzipped
+└── <repo-name>-project-analysis.ndjson.gz    ← auto-detect mode
+└── <language>-imports.ndjson.gz              ← manual language mode
 ```
 
-**Per-file record:**
+### Per-file record
+
 ```json
 {
   "path": "src/services/user-service.ts",
@@ -149,7 +164,12 @@ When `--provider bedrock` is specified, the following AWS credentials are also r
 }
 ```
 
-**Function record:**
+- **`importFiles`** — local files resolved to repo-relative paths
+- **`externalImports`** — npm packages / external module names
+- **`statements`** — top-level module/file-scope declarations (when `--capture-statements` is enabled)
+
+### Function record
+
 ```json
 {
   "name": "getUser",
@@ -158,37 +178,101 @@ When `--provider bedrock` is specified, the following AWS credentials are also r
   "visibility": "public",
   "params": [{ "name": "id", "type": "string" }],
   "returnType": "Promise<User>",
+  "generics": "<T>",
   "startLine": 10,
   "endLine": 25,
-  "calls": ["apiFetch", "getAuthHeaders"],
+  "calls": [{ "name": "apiFetch", "path": "src/lib/api-client.ts" }],
   "statements": [ ... ]
 }
 ```
 
-**Project metadata record (last line):**
+- **`type`** — AST node type: `arrow_function`, `function_declaration`, `method_definition`, `function_signature`, etc.
+- **`kind`** — `function`, `instance`, or `static`
+- **`generics`** — TypeScript only (e.g., `<T extends BaseEntity>`)
+- **`receiver`** — Go only (receiver type name for methods)
+- Functions with no resolvable name (anonymous, unassigned) are excluded from output
+
+### Class record
+
+```json
+{
+  "name": "UserService",
+  "type": "class",
+  "visibility": "public",
+  "isAbstract": false,
+  "generics": "<T extends BaseEntity>",
+  "extends": "BaseService",
+  "implements": ["IUserService", "IDisposable"],
+  "constructorParams": ["userRepo", "emailService"],
+  "methods": ["createUser", "deleteUser", "findById"],
+  "statements": [ ... ],
+  "startLine": 10,
+  "endLine": 80
+}
+```
+
+- Go uses `type: "struct"` or `type: "interface"` (no `extends`, `implements`, or `isAbstract`)
+- Go struct fields are listed in `constructorParams`
+- TypeScript also extracts `interface_declaration` as `type: "interface"`
+
+### Project metadata record (last line)
+
 ```json
 {
   "__type": "projectMetaData",
+  "repositoryPath": "/absolute/path/to/repo",
   "repositoryName": "my-project",
   "analyzedLanguages": ["typescript", "python"],
   "totalFiles": 376,
   "totalFunctions": 1582,
   "totalClasses": 428,
   "totalLinesOfCode": 98838,
+  "configs": {
+    "totalConfigFiles": 12,
+    "byType": { "json": 3, "yaml": 2, "docker": 1, "env": 1, "typescript": 45 },
+    "packageManagers": ["npm"],
+    "dockerInfo": {
+      "hasDockerfile": true,
+      "hasDockerCompose": false,
+      "services": [],
+      "exposedPorts": ["3000"]
+    },
+    "buildTools": ["typescript"],
+    "dependencies": { "total": 72, "production": 50, "development": 22 }
+  },
   "generatedAt": "2025-01-12T10:30:00.000Z",
   "toolVersion": "1.0.0"
 }
 ```
 
+### Config file analysis
+
+Config files are scanned at the repository root level and produce per-file metadata records with `type: "config"`. Key data extracted per type:
+
+| File | Fields extracted |
+|---|---|
+| `package.json` | `name`, `version`, `scripts`, `dependencies`, `devDependencies` |
+| `tsconfig.json` / `jsconfig.json` | `target`, `module`, `outDir`, `rootDir`, `strict`, `include`, `exclude` |
+| `docker-compose.yml` | `services`, `serviceCount`, `exposedPorts`, `volumes` |
+| `Dockerfile` | `baseImages`, `exposedPorts`, `volumes`, `workdir`, `entrypoint`, `env` variable names |
+| `.env` | Variable names only (not values), `variableCount` |
+| `pom.xml` | `groupId`, `artifactId`, `version`, `dependencyCount` |
+| `requirements.txt` / `setup.py` | Package names, `dependencyCount` |
+| `build.gradle` | `dependencyCount`, `isKotlinDSL` |
+
 ---
 
 ## 📋 Statements Captured (`--capture-statements`)
 
-When `--capture-statements` is enabled, each function and class body is analyzed for the following statement types.
+When `--capture-statements` is enabled, each function, class, and file scope is analyzed for the following statement types. Statement text is truncated to prevent oversized output.
+
+| Context | Default text limit |
+|---|---|
+| Variable / type declarations | 1,000 chars (200 chars if the value is a function — already captured in `functions[]`) |
+| Return statements | 200 chars |
+| `query_statement` and `api_call` | 500 chars |
 
 ### 🔤 Variable & Type Declarations
-
-Captured from the direct body of functions and classes.
 
 | Statement Type | Description | Languages |
 |---|---|---|
@@ -207,7 +291,7 @@ Captured from the direct body of functions and classes.
 
 | Statement Type | Description |
 |---|---|
-| `return_statement` | Return statements, including those inside nested `if`/`else`, loops, and `try`/`catch` blocks |
+| `return_statement` | Return statements — including those inside nested `if`/`else`, loops, and `try`/`catch` blocks |
 
 ---
 
@@ -222,7 +306,7 @@ Detected by traversing the full function body for HTTP client calls.
   "type": "api_call",
   "method": "POST",
   "endpoint": "{param}/projects/{param}",
-  "text": "apiFetch(url, { method: \"POST\", body: JSON.stringify(body), ... })",
+  "text": "apiFetch(url, { method: \"POST\", body: JSON.stringify(body) })",
   "startLine": 23,
   "endLine": 30
 }
@@ -231,7 +315,7 @@ Detected by traversing the full function body for HTTP client calls.
 | Field | Description | Example |
 |---|---|---|
 | `method` | HTTP verb | `GET`, `POST`, `PUT`, `DELETE`, `PATCH` |
-| `endpoint` | URL or URL template (dynamic segments → `{param}`) | `{param}/users/{param}` |
+| `endpoint` | URL template (dynamic segments → `{param}`) | `{param}/users/{param}` |
 | `text` | Raw call source (up to 500 chars) | `apiFetch(url, { method: "PUT", ... })` |
 | `startLine` / `endLine` | Line range in the source file | `23` / `30` |
 
@@ -243,7 +327,7 @@ Detected by traversing the full function body for HTTP client calls.
 **Endpoint resolution:**
 - String literal: `fetch('/api/users')` → `/api/users`
 - Template string: `` fetch(`/api/users/${id}`) `` → `/api/users/{param}`
-- Variable reference: `const url = \`...\`; apiFetch(url, ...)` → resolved from the variable declaration in the same function scope
+- Variable reference: `const url = \`${base}/users\`; apiFetch(url, ...)` → resolved from the variable declaration in the same function scope
 
 **Detected HTTP clients:**
 
@@ -253,10 +337,10 @@ Detected by traversing the full function body for HTTP client calls.
 | Axios | `axios.get()`, `axios.post()`, `axios.put()`, `axios.delete()` |
 | Angular HttpClient | `this.http.get()`, `this.$http.post()`, `this.httpClient.request()` |
 | Generic clients | `api.get()`, `apiClient.post()`, `httpService.put()`, `restClient.delete()` |
-| Other libraries | `got`, `superagent`, `ky`, `ofetch` |
+| Other JS libraries | `got`, `superagent`, `ky`, `ofetch` |
 | Python | `requests.get()`, `httpx.post()`, `session.put()` |
-| Java/Spring | `restTemplate.getForObject()`, `webClient.post()` |
-| C#/.NET | `HttpClient.GetAsync()`, `_httpClient.PostAsync()` |
+| Java / Spring | `restTemplate.getForObject()`, `webClient.post()` |
+| C# / .NET | `HttpClient.GetAsync()`, `_httpClient.PostAsync()` |
 | PHP | `Http::get()`, `Guzzle::post()`, `$client->put()` |
 
 ---
@@ -280,21 +364,21 @@ Detected by traversing the full function body for DB client calls or raw query s
 | Field | Description | Example |
 |---|---|---|
 | `db` | Database / ORM identified | `prisma`, `mongodb`, `redis`, `sequelize` |
-| `text` | Raw call expression or query string (up to 500 chars) | `User.findAll({ where: { active: true } })` |
+| `text` | Raw call or query string (up to 500 chars) | `User.findAll({ where: { active: true } })` |
 | `startLine` / `endLine` | Line range in the source file | `45` / `47` |
 
 **Detected databases and ORMs:**
 
-| Database / ORM | Detection Method | Key Methods / Patterns |
+| Database / ORM | Detection | Key Methods / Patterns |
 |---|---|---|
 | **SQL (raw)** | String patterns | `SELECT`, `INSERT INTO`, `UPDATE ... SET`, `DELETE FROM`, `CREATE TABLE` |
 | **Sequelize** | Method names | `findAll`, `findOne`, `findByPk`, `findOrCreate`, `upsert`, `bulkCreate`, `destroy` |
 | **Prisma** | Method names | `findMany`, `findFirst`, `findUnique`, `create`, `update`, `delete`, `upsert` |
 | **TypeORM** | Method names | `createQueryBuilder`, `getRepository`, `save`, `findOneBy` |
 | **MongoDB** | Method names | `insertOne`, `updateOne`, `deleteOne`, `aggregate`, `findOneAndUpdate`, `bulkWrite` |
-| **Neo4j** | Method names | `readTransaction`, `writeTransaction`, `executeRead`, `executeWrite`, `run` |
+| **Neo4j** | Method names | `readTransaction`, `writeTransaction`, `executeRead`, `executeWrite` |
 | **Redis** | Method names | `get`, `set`, `hget`, `hset`, `lpush`, `rpush`, `sadd`, `zadd`, `mset`, `mget` |
-| **DynamoDB** | Method names | `getItem`, `putItem`, `deleteItem`, `batchGetItem`, `transactWriteItems`, `scan`, `query` |
+| **DynamoDB** | Method names | `getItem`, `putItem`, `deleteItem`, `batchGetItem`, `transactWriteItems`, `scan` |
 | **Firebase** | Method names | `getDocs`, `getDoc`, `setDoc`, `addDoc`, `updateDoc`, `deleteDoc`, `onSnapshot` |
 | **Elasticsearch** | Method names | `search`, `index`, `bulk`, `msearch` |
 | **CouchDB** | Method names | `allDocs`, `bulkDocs`, `createIndex`, `find` |
@@ -306,24 +390,84 @@ Detected by traversing the full function body for DB client calls or raw query s
 | **Cypher (Neo4j)** | String patterns | `MATCH`, `CREATE`, `MERGE`, `DETACH DELETE`, `LOAD CSV` |
 | **MongoDB DSL** | String patterns | `$match`, `$group`, `$lookup`, `$unwind`, `$project` |
 | **Elasticsearch DSL** | String patterns | `bool`, `must`, `should`, `match`, `term`, `range` |
-| **Salesforce SOQL** | AST node type | Inline `soql_expression` nodes (Salesforce only) |
-| **Salesforce SOSL** | AST node type | Inline `sosl_expression` nodes (Salesforce only) |
+| **Salesforce SOQL** | AST node | Inline `soql_expression` nodes (Salesforce only) |
+| **Salesforce SOSL** | AST node | Inline `sosl_expression` nodes (Salesforce only) |
+
+---
+
+## 🌍 Language-Specific Behaviours
+
+### TypeScript / JavaScript
+
+- TypeScript path aliases (e.g. `@/`, `~/`) are resolved via `tsconfig.json` `compilerOptions.paths`.
+- `--language typescript` also processes `.js` / `.jsx` files using the TypeScript grammar.
+- TypeScript adds `generics` field to function and class records.
+- TypeScript classes include `interface_declaration` as `type: "interface"`.
+- `function_signature` nodes (interface method signatures) are extracted as functions with `statements: []`.
+
+### Python
+
+- Visibility is derived from naming convention: `__name` (not dunder) → `private`; `_name` → `protected`; all others → `public`.
+- `self` and `cls` parameters are excluded from `params`.
+- No `returnType` field is emitted (Python lacks static return type enforcement).
+
+### Go
+
+- Visibility is determined by capitalisation: exported (uppercase first letter) → `public`; unexported → `private`.
+- Method records include a `receiver` field with the receiver type name.
+- Go module imports are resolved against `go.mod` for local path mapping.
+- Struct fields appear in `constructorParams`; embedded fields are listed as `_embedded_TypeName`.
+
+### C\#
+
+- Default visibility is `private` (not `public`).
+- Supports `internal` visibility in addition to `public`, `private`, `protected`.
+- Local functions (`local_function_statement`) are extracted as `type: "local_function"`.
+
+### Vue
+
+- `<script>` and `<script setup>` blocks are extracted and parsed with the JavaScript grammar.
+- `<script lang="ts">` blocks are **skipped** — TypeScript-flavored Vue scripts are not currently analyzed.
+- Line numbers in the output refer to the original `.vue` file, not the extracted script block.
+- Path alias `@/` and `~/` are both resolved to `src/`.
+
+### Salesforce Apex
+
+- The `global` Apex keyword is mapped to `public` visibility; default is `private`.
+- SOQL/SOSL queries are captured both via AST node type and string-literal pattern matching.
+- Class references are resolved across all Apex files in the repository (cross-file call paths).
 
 ---
 
 ## 🚫 Ignore Patterns
 
-Files and directories are excluded from analysis via `.repoignore` files (same syntax as `.gitignore`):
+Files and directories are excluded from analysis via `.repoignore` files (same syntax as `.gitignore`). Three layers of patterns are applied:
 
-- **Built-in defaults** — `node_modules/`, `dist/`, `build/`, `.git/`, `*.min.js`, lock files, etc.
-- **Language defaults** — e.g. `.next/`, `.nuxt/` for TypeScript/JavaScript
-- **Repo-level overrides** — place a `.repoignore` file at the root of the target repository to add project-specific exclusions
+1. **Built-in defaults** (always active) — covers common noise across all languages:
+   - VCS: `.git/`, `.svn/`, `.hg/`
+   - Dependencies: `node_modules/`, `vendor/`, `bower_components/`, `site-packages/`
+   - Build output: `dist/`, `build/`, `out/`, `target/`, `bin/`, `obj/`
+   - Virtual envs: `venv/`, `.venv/`
+   - Caches: `.gradle/`, `.m2/`, `.nuget/`, `.cache/`, `__pycache__/`
+   - Docs / assets: `docs/`, `*.svg`, `*.png`, `*.jpg`, `*.pdf`, font files, video/audio files
+   - Large data: `*.csv`, `*.parquet`, `*.h5`, model weights (`*.pt`, `*.onnx`)
+   - Secrets: `.env`, `.env.*`, `*.secret`, `*.local`
+   - Logs / temp: `*.log`, `*.tmp`, `*.lock`, `*.bak`
+   - ⚠️ **Test files are excluded by default**: `tests/`, `test/`, `__tests__/`, `spec/`, `*.test.*`, `*.spec.*`, `*.snap`
+
+2. **Language-specific defaults** — extra patterns per language folder (e.g. `.next/`, `.nuxt/`, `*.min.js` for TypeScript/JavaScript; `*.pyc`, `.pytest_cache/` for Python; `*.pb.go`, `*_generated.go` for Go; `*.designer.cs`, `*.generated.cs` for C#).
+
+3. **Repo-level overrides** — place a `.repoignore` file at the root of the target repository to add project-specific exclusions.
+
+> **Important:** To include test files in the analysis, add negation overrides in a repo-level `.repoignore`.
 
 ---
 
 ## 🛠️ Other Commands
 
 ### Upload documents
+
+Uploads files from a local directory to the BreezeAI documents API. Supported formats: `.pdf`, `.txt`, `.md`, `.png`, `.jpg`.
 
 ```bash
 node cli.js upload-docs \
@@ -333,15 +477,51 @@ node cli.js upload-docs \
   --user-api-key <key>
 ```
 
-### Start HTTP server
+### HTTP server
+
+Starts a local HTTP server for programmatic access to the analyzer.
 
 ```bash
 node cli.js serve --port 3000
+# Port can also be set via the PORT environment variable
 ```
+
+**Endpoints:**
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Health check — returns `{ "status": "ok" }` |
+| `POST` | `/api/analyze` | Analyze files passed as `{ files: [{ path, content }] }` in the request body. Returns parsed JSON directly (not `.ndjson.gz`). |
+| `POST` | `/api/analyze-diff` | Fetch and analyze only changed files between two Git commits via GitHub API. Streams result as `.ndjson.gz` directly to S3 and notifies BreezeAI. |
+
+**Environment variables used by the server:**
+
+| Variable | Description |
+|---|---|
+| `PORT` | HTTP server port (default: `3000`) |
+| `BREEZE_API_URL` | BreezeAI backend URL for stream-ingest notifications (required for `/api/analyze-diff`) |
+| `AWS_S3_BUCKET` | S3 bucket for diff analysis output (required for `/api/analyze-diff`) |
+| `AWS_ACCESS_KEY` | AWS access key ID |
+| `AWS_SECRET_KEY` | AWS secret access key |
+| `AWS_REGION` | AWS region (default: `us-west-2`) |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `CLAUDE_API_KEY` | Anthropic Claude API key |
+| `GEMINI_API_KEY` | Google Gemini API key |
 
 ---
 
-## ⚙️ Prerequisites
+## 🐳 Docker Deployment
 
-- **Node.js v20+**
-- `npm install` to install tree-sitter grammars and other dependencies
+A `Dockerfile` is included for containerised deployment:
+
+```bash
+docker build -t breeze-code-ontology-generator .
+docker run -p 3000:3000 \
+  -e BREEZE_API_URL=https://api.breezeai.com \
+  -e AWS_S3_BUCKET=my-bucket \
+  -e AWS_ACCESS_KEY=... \
+  -e AWS_SECRET_KEY=... \
+  breeze-code-ontology-generator
+```
+
+A Kubernetes deployment manifest (`breezeai-code-ontology-generator-deploy.yaml`) is also available in the repository root.
