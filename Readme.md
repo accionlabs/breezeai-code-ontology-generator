@@ -8,7 +8,7 @@ A static analysis tool that parses source code repositories and produces a struc
 
 ## ⚙️ Prerequisites
 
-- **Node.js v18+**
+- **Node.js v22+**
 - Run `npm install` after cloning — a postinstall script rebuilds native tree-sitter grammars
 
 ---
@@ -430,6 +430,16 @@ Detected by traversing the full function body for DB client calls or raw query s
 - `<script lang="ts">` blocks are **skipped** — TypeScript-flavored Vue scripts are not currently analyzed.
 - Line numbers in the output refer to the original `.vue` file, not the extracted script block.
 - Path alias `@/` and `~/` are both resolved to `src/`.
+
+### Perl
+
+- File extensions: `.pl`, `.pm`.
+- Both `subroutine_declaration_statement` and `subroutine_definition` nodes are extracted as functions.
+- Visibility is derived from naming convention: `__name` (not dunder) → `private`; `_name` → `protected`; all others → `public`.
+- Subroutines defined after a `package` statement are tagged with `kind: "method"`; otherwise `kind: "function"`.
+- Function records include a `prototype` field when a Perl prototype is declared.
+- Imports are resolved from `use`, `require`, and `do` statements. `use lib "..."` entries are recorded with `isLib: true`; `do "file"` entries are recorded with `isDo: true`. Imported symbol lists from `use Module qw(...)` are captured in `imported`.
+- Direct calls extracted include `function_call_expression`, `ambiguous_function_call_expression`, and `method_call_expression` (with object resolution against imported modules).
 
 ### Salesforce Apex
 
