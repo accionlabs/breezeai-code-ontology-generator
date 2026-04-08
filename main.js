@@ -107,17 +107,15 @@ const LANGUAGE_CONFIG = {
     analyzer: analyzeVueRepo,
     priority: 2, // Check before plain JavaScript so .vue files are detected
   },
-<<<<<<< HEAD
   sql: {
     extensions: ["**/*.sql"],
     name: "SQL/DDL (Oracle)",
     analyzer: analyzeSQLRepo,
-=======
+  },
   perl: {
     extensions: ["**/*.pl", "**/*.pm", "**/*.psgi", "**/*.t"],
     name: "Perl",
     analyzer: analyzePerlRepo,
->>>>>>> cd9f950bc6129353e58ba2d4b2aff77040440188
   },
 };
 
