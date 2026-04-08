@@ -50,7 +50,7 @@ async function run(opts) {
   const importsOutput = path.join(outputDir, `${language}-imports.json`);
 
   const scriptMap = {
-    perl: "perl/file-tree-mapper.js",
+    perl: "perl/file-tree-mapper-perl.js",
     javascript: "nodejs/file-tree-mapper-nodejs.js",
     python: "python/file-tree-mapper-python.js",
     java: "java/file-tree-main-java.js",
