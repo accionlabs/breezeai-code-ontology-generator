@@ -1,0 +1,44 @@
+################################################
+# PERL
+################################################
+
+# Perl-specific directories
+blib/
+_build/
+Build/
+inc/
+local/
+perl5/
+
+# Build artifacts
+Makefile
+Makefile.old
+pm_to_blib
+*.packlist
+*.bs
+
+# CPAN and dependency directories
+cpan/
+cpanfile.snapshot
+
+# Testing
+t/
+xt/
+.prove/
+
+# Generated files
+cover_db/
+nocover.out
+
+# Development files
+Cartonfile
+cpanfile
+
+# Compiled
+*.o
+*.so
+*.pmc
+
+# Backup files
+*.bak
+*~

@@ -8,7 +8,7 @@ A static analysis tool that parses source code repositories and produces a struc
 
 ## ⚙️ Prerequisites
 
-- **Node.js v18+**
+- **Node.js v22+**
 - Run `npm install` after cloning — a postinstall script rebuilds native tree-sitter grammars
 
 ---
@@ -64,22 +64,20 @@ npx github:accionlabs/breezeai-code-ontology-generator repo-to-json-tree \
 
 ## 🌐 Supported Languages
 
-| Language | `--language` value | File Extensions | Auto-detect only |
-|---|---|---|---|
-| TypeScript / TSX | `typescript` | `.ts`, `.tsx` (+ `.js`, `.jsx`) | No |
-| JavaScript / JSX | `javascript` | `.js`, `.jsx` | No |
-| Python | `python` | `.py` | No |
-| Java | `java` | `.java` | No |
-| C# | `csharp` | `.cs` | **Yes** |
-| Go | `golang` | `.go` | **Yes** |
-| PHP | `php` | `.php` | No |
-| VB.NET | `vbnet` | `.vb` | No |
-| Vue | `vue` | `.vue` | **Yes** |
-| Salesforce Apex | `salesforce` | `.cls`, `.trigger` | **Yes** |
-| Perl | `perl` | `.pl`, `.pm` | No |
-| Config files | `config` | `.json`, `.yml`, `.yaml`, `Dockerfile`, `.env`, `.ini`, `.toml`, `.xml`, `.gradle`, `Makefile`, and more | **Yes** |
-
-> Languages marked **Auto-detect only** are not available via `--language`. They are processed automatically when detected in the repository.
+| Language | `--language` value | File Extensions |
+|---|---|---|
+| TypeScript / TSX | `typescript` | `.ts`, `.tsx` (+ `.js`, `.jsx`) |
+| JavaScript / JSX | `javascript` | `.js`, `.jsx` |
+| Python | `python` | `.py` |
+| Java | `java` | `.java` |
+| C# | `csharp` | `.cs` |
+| Go | `golang` | `.go` |
+| PHP | `php` | `.php` |
+| VB.NET | `vbnet` | `.vb` |
+| Vue | `vue` | `.vue` |
+| Salesforce Apex | `salesforce` | `.cls`, `.trigger` |
+| Perl | `perl` | `.pl`, `.pm` |
+| Config files | `config` | `.json`, `.yml`, `.yaml`, `Dockerfile`, `.env`, `.ini`, `.toml`, `.xml`, `.gradle`, `Makefile`, and more |
 
 > **TypeScript note:** When `--language typescript` is used, the TypeScript parser also processes any `.js` and `.jsx` files it encounters through imports.
 
@@ -430,6 +428,16 @@ Detected by traversing the full function body for DB client calls or raw query s
 - `<script lang="ts">` blocks are **skipped** — TypeScript-flavored Vue scripts are not currently analyzed.
 - Line numbers in the output refer to the original `.vue` file, not the extracted script block.
 - Path alias `@/` and `~/` are both resolved to `src/`.
+
+### Perl
+
+- File extensions: `.pl`, `.pm`.
+- Both `subroutine_declaration_statement` and `subroutine_definition` nodes are extracted as functions.
+- Visibility is derived from naming convention: `__name` (not dunder) → `private`; `_name` → `protected`; all others → `public`.
+- Subroutines defined after a `package` statement are tagged with `kind: "method"`; otherwise `kind: "function"`.
+- Function records include a `prototype` field when a Perl prototype is declared.
+- Imports are resolved from `use`, `require`, and `do` statements. `use lib "..."` entries are recorded with `isLib: true`; `do "file"` entries are recorded with `isDo: true`. Imported symbol lists from `use Module qw(...)` are captured in `imported`.
+- Direct calls extracted include `function_call_expression`, `ambiguous_function_call_expression`, and `method_call_expression` (with object resolution against imported modules).
 
 ### Salesforce Apex
 
