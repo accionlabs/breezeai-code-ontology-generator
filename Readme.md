@@ -64,22 +64,20 @@ npx github:accionlabs/breezeai-code-ontology-generator repo-to-json-tree \
 
 ## 🌐 Supported Languages
 
-| Language | `--language` value | File Extensions | Auto-detect only |
-|---|---|---|---|
-| TypeScript / TSX | `typescript` | `.ts`, `.tsx` (+ `.js`, `.jsx`) | No |
-| JavaScript / JSX | `javascript` | `.js`, `.jsx` | No |
-| Python | `python` | `.py` | No |
-| Java | `java` | `.java` | No |
-| C# | `csharp` | `.cs` | **Yes** |
-| Go | `golang` | `.go` | **Yes** |
-| PHP | `php` | `.php` | No |
-| VB.NET | `vbnet` | `.vb` | No |
-| Vue | `vue` | `.vue` | **Yes** |
-| Salesforce Apex | `salesforce` | `.cls`, `.trigger` | **Yes** |
-| Perl | `perl` | `.pl`, `.pm` | No |
-| Config files | `config` | `.json`, `.yml`, `.yaml`, `Dockerfile`, `.env`, `.ini`, `.toml`, `.xml`, `.gradle`, `Makefile`, and more | **Yes** |
-
-> Languages marked **Auto-detect only** are not available via `--language`. They are processed automatically when detected in the repository.
+| Language | `--language` value | File Extensions |
+|---|---|---|
+| TypeScript / TSX | `typescript` | `.ts`, `.tsx` (+ `.js`, `.jsx`) |
+| JavaScript / JSX | `javascript` | `.js`, `.jsx` |
+| Python | `python` | `.py` |
+| Java | `java` | `.java` |
+| C# | `csharp` | `.cs` |
+| Go | `golang` | `.go` |
+| PHP | `php` | `.php` |
+| VB.NET | `vbnet` | `.vb` |
+| Vue | `vue` | `.vue` |
+| Salesforce Apex | `salesforce` | `.cls`, `.trigger` |
+| Perl | `perl` | `.pl`, `.pm` |
+| Config files | `config` | `.json`, `.yml`, `.yaml`, `Dockerfile`, `.env`, `.ini`, `.toml`, `.xml`, `.gradle`, `Makefile`, and more |
 
 > **TypeScript note:** When `--language typescript` is used, the TypeScript parser also processes any `.js` and `.jsx` files it encounters through imports.
 
