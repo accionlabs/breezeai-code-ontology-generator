@@ -109,7 +109,7 @@ const LANGUAGE_CONFIG = {
   },
   sql: {
     extensions: ["**/*.sql"],
-    name: "SQL/DDL (Oracle)",
+    name: "SQL/DDL",
     analyzer: analyzeSQLRepo,
   },
   perl: {

@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const glob = require('glob');
 const { getIgnorePatternsWithPrefix } = require('../ignore-patterns');
-const { parseOracleDDL } = require('./extract-ddl-oracle');
+const { parseDDL } = require('./extract-ddl');
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -62,15 +62,25 @@ function analyzeSQLRepo(repoPath, opts = {}) {
 
     try {
       const ddlText = fs.readFileSync(filePath, 'utf8');
-      const parsed = parseOracleDDL(ddlText);
+      const parsed = parseDDL(ddlText, { dialect: opts.dialect, filePath });
 
       // Only emit a record if there's something meaningful
+      const sequences = parsed.sequences || [];
       if (
         parsed.tables.length === 0 &&
         parsed.views.length === 0 &&
         parsed.procedures.length === 0 &&
-        parsed.allIndexes.length === 0
+        parsed.allIndexes.length === 0 &&
+        sequences.length === 0
       ) {
+        if (ddlText.trim().length > 0) {
+          process.stdout.write('\n');
+          console.warn(
+            `⚠️  ${relPath}: detected dialect=${parsed.dialect} but extracted no DDL objects` +
+              (parsed.parseStats ? ` (parsed ${parsed.parseStats.ok}, failed ${parsed.parseStats.failed})` : '') +
+              (parsed.parseReport ? ` (parsed ${parsed.parseReport.parsed}/${parsed.parseReport.totalStatements}, skipped ${parsed.parseReport.skipped})` : '')
+          );
+        }
         continue;
       }
 
@@ -78,11 +88,14 @@ function analyzeSQLRepo(repoPath, opts = {}) {
         __type: 'ddl',
         path: relPath,
         language: 'sql',
+        dialect: parsed.dialect,
         tables: parsed.tables,
         views: parsed.views,
         procedures: parsed.procedures,
         indexes: parsed.allIndexes,
+        sequences,
       };
+      if (parsed.parseReport) record.parseReport = parsed.parseReport;
 
       if (opts.onResult) {
         opts.onResult(record);
