@@ -992,6 +992,158 @@ function parseAlterTableDropConstraint(stmt) {
 }
 
 // -----------------------------------------------------------
+// ALTER TABLE … ADD <column(s)>
+// -----------------------------------------------------------
+
+/**
+ * Parse `ALTER TABLE [schema.]name ADD (<col_def>, ...)` or
+ *        `ALTER TABLE [schema.]name ADD <col_def>` (single column, no parens).
+ *
+ * Returns { owner, tableName, columns[], inlineConstraints[] } or null.
+ */
+function parseAlterTableAddColumn(stmt) {
+  const re = new RegExp(
+    '^ALTER\\s+TABLE\\s+(?:ONLY\\s+)?(?:(' + IDENT_RE_SRC + ')\\.)?(' + IDENT_RE_SRC + ')\\s+ADD\\s+([\\s\\S]+)',
+    'i'
+  );
+  const m = stmt.match(re);
+  if (!m) return null;
+
+  const owner = m[1] ? unquoteIdent(m[1]) : null;
+  const tableName = unquoteIdent(m[2]);
+  let addBody = m[3].trim();
+
+  // If it's a constraint (starts with CONSTRAINT, PRIMARY, UNIQUE, FOREIGN, CHECK)
+  // that's handled by parseAlterTableConstraint — bail out here.
+  if (/^(CONSTRAINT\b|PRIMARY\s+KEY\b|UNIQUE\b|FOREIGN\s+KEY\b|CHECK\b)/i.test(addBody)) return null;
+
+  // Unwrap optional outer parens: ADD (col1 NUMBER, col2 VARCHAR2(20))
+  if (addBody.startsWith('(')) {
+    const end = findMatchingParen(addBody, 0);
+    if (end !== -1) addBody = addBody.slice(1, end);
+  }
+
+  const defs = splitColumnDefs(addBody);
+  const columns = [];
+  const inlineConstraints = [];
+
+  for (const def of defs) {
+    // Skip table-level constraints that snuck in
+    if (/^(CONSTRAINT\b|PRIMARY\s+KEY\b|UNIQUE\b|FOREIGN\s+KEY\b|CHECK\b)/i.test(def.trim())) {
+      const con = parseTableConstraint(def, tableName);
+      if (con) inlineConstraints.push(con);
+      continue;
+    }
+    const result = parseColumnDef(def, tableName);
+    if (result) {
+      columns.push(result.column);
+      if (result.inlineConstraints) inlineConstraints.push(...result.inlineConstraints);
+    }
+  }
+
+  if (columns.length === 0 && inlineConstraints.length === 0) return null;
+  return { owner, tableName, columns, inlineConstraints };
+}
+
+// -----------------------------------------------------------
+// ALTER TABLE … MODIFY <column(s)>
+// -----------------------------------------------------------
+
+/**
+ * Parse `ALTER TABLE [schema.]name MODIFY (<col_def>, ...)` or
+ *        `ALTER TABLE [schema.]name MODIFY <col_def>`.
+ *
+ * Returns { owner, tableName, modifications[] } where each modification is a
+ * partial column object (name + whichever properties the MODIFY changes).
+ */
+function parseAlterTableModifyColumn(stmt) {
+  const re = new RegExp(
+    '^ALTER\\s+TABLE\\s+(?:ONLY\\s+)?(?:(' + IDENT_RE_SRC + ')\\.)?(' + IDENT_RE_SRC + ')\\s+MODIFY\\s+([\\s\\S]+)',
+    'i'
+  );
+  const m = stmt.match(re);
+  if (!m) return null;
+
+  const owner = m[1] ? unquoteIdent(m[1]) : null;
+  const tableName = unquoteIdent(m[2]);
+  let modBody = m[3].trim();
+
+  // Unwrap optional outer parens
+  if (modBody.startsWith('(')) {
+    const end = findMatchingParen(modBody, 0);
+    if (end !== -1) modBody = modBody.slice(1, end);
+  }
+
+  const defs = splitColumnDefs(modBody);
+  const modifications = [];
+
+  for (const def of defs) {
+    const result = parseColumnDef(def, tableName);
+    if (result) modifications.push(result.column);
+  }
+
+  if (modifications.length === 0) return null;
+  return { owner, tableName, modifications };
+}
+
+// -----------------------------------------------------------
+// ALTER TABLE … DROP COLUMN / RENAME COLUMN
+// -----------------------------------------------------------
+
+/**
+ * Parse `ALTER TABLE [schema.]name DROP COLUMN col [CASCADE CONSTRAINTS]` or
+ *        `ALTER TABLE [schema.]name DROP (col1, col2, ...)`.
+ */
+function parseAlterTableDropColumn(stmt) {
+  const re1 = new RegExp(
+    '^ALTER\\s+TABLE\\s+(?:ONLY\\s+)?(?:(' + IDENT_RE_SRC + ')\\.)?(' + IDENT_RE_SRC + ')\\s+DROP\\s+COLUMN\\s+(' + IDENT_RE_SRC + ')',
+    'i'
+  );
+  const m1 = stmt.match(re1);
+  if (m1) {
+    return {
+      owner: m1[1] ? unquoteIdent(m1[1]) : null,
+      tableName: unquoteIdent(m1[2]),
+      columns: [unquoteIdent(m1[3])],
+    };
+  }
+
+  // DROP (col1, col2, ...)  — but NOT DROP CONSTRAINT
+  const re2 = new RegExp(
+    '^ALTER\\s+TABLE\\s+(?:ONLY\\s+)?(?:(' + IDENT_RE_SRC + ')\\.)?(' + IDENT_RE_SRC + ')\\s+DROP\\s+\\(([^)]+)\\)',
+    'i'
+  );
+  const m2 = stmt.match(re2);
+  if (m2) {
+    return {
+      owner: m2[1] ? unquoteIdent(m2[1]) : null,
+      tableName: unquoteIdent(m2[2]),
+      columns: splitColList(m2[3]),
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Parse `ALTER TABLE [schema.]name RENAME COLUMN old TO new`.
+ */
+function parseAlterTableRenameColumn(stmt) {
+  const re = new RegExp(
+    '^ALTER\\s+TABLE\\s+(?:ONLY\\s+)?(?:(' + IDENT_RE_SRC + ')\\.)?(' + IDENT_RE_SRC + ')\\s+RENAME\\s+COLUMN\\s+(' + IDENT_RE_SRC + ')\\s+TO\\s+(' + IDENT_RE_SRC + ')',
+    'i'
+  );
+  const m = stmt.match(re);
+  if (!m) return null;
+  return {
+    owner: m[1] ? unquoteIdent(m[1]) : null,
+    tableName: unquoteIdent(m[2]),
+    oldName: unquoteIdent(m[3]),
+    newName: unquoteIdent(m[4]),
+  };
+}
+
+// -----------------------------------------------------------
 // Utility
 // -----------------------------------------------------------
 
@@ -1039,6 +1191,7 @@ function parseOracleDDL(ddlText) {
     byKind: {
       table: 0, view: 0, procedure: 0, index: 0, sequence: 0,
       comment: 0, alterAdd: 0, alterDrop: 0,
+      alterAddColumn: 0, alterModifyColumn: 0, alterDropColumn: 0, alterRenameColumn: 0,
     },
   };
 
@@ -1117,61 +1270,180 @@ function parseOracleDDL(ddlText) {
         recordSkip(stripped, 'comment_unparsed');
       }
     } else if (upper.startsWith('ALTER')) {
-      // Snapshot semantics: apply ADD CONSTRAINT and DROP CONSTRAINT in order so
+      // Snapshot semantics: apply all ALTER TABLE mutations in file order so
       // re-parsing the same file always yields the same final state.
-      const drop = parseAlterTableDropConstraint(stripped);
-      if (drop) {
-        const existing = tableMap[drop.tableName] || (drop.owner && tableMap[`${drop.owner}.${drop.tableName}`]);
-        if (existing) {
-          const before = existing.constraints.length;
-          existing.constraints = existing.constraints.filter(c => c.name !== drop.constraintName);
-          if (before !== existing.constraints.length) {
-            // Recompute hasPrimaryKey + column flags after the drop
-            const hasPk = existing.constraints.some(c => c.constraintType === 'PRIMARY_KEY');
-            existing.hasPrimaryKey = hasPk;
-            for (const col of existing.columns) {
-              col.isPrimaryKey = false;
-              col.isForeignKey = false;
-            }
-            for (const c of existing.constraints) {
-              if (c.constraintType === 'PRIMARY_KEY') {
-                for (const col of existing.columns) {
-                  if (c.columns && c.columns.includes(col.name)) col.isPrimaryKey = true;
-                }
-              }
-              if (c.constraintType === 'FOREIGN_KEY') {
-                for (const col of existing.columns) {
-                  if (c.columns && c.columns.includes(col.name)) col.isForeignKey = true;
-                }
-              }
+
+      // Helper to look up a table by name (with optional owner prefix)
+      function findTable(name, owner) {
+        return tableMap[name] || (owner && tableMap[`${owner}.${name}`]) || null;
+      }
+
+      // Helper to recompute column PK/FK flags from constraints
+      function recomputeColumnFlags(tbl) {
+        for (const col of tbl.columns) {
+          col.isPrimaryKey = false;
+          col.isForeignKey = false;
+        }
+        tbl.hasPrimaryKey = false;
+        for (const c of tbl.constraints) {
+          if (c.constraintType === 'PRIMARY_KEY') {
+            tbl.hasPrimaryKey = true;
+            for (const col of tbl.columns) {
+              if (c.columns && c.columns.includes(col.name)) col.isPrimaryKey = true;
             }
           }
+          if (c.constraintType === 'FOREIGN_KEY') {
+            for (const col of tbl.columns) {
+              if (c.columns && c.columns.includes(col.name)) col.isForeignKey = true;
+            }
+          }
+        }
+      }
+
+      let handled = false;
+
+      // --- DROP CONSTRAINT ---
+      const dropCon = parseAlterTableDropConstraint(stripped);
+      if (dropCon) {
+        const tbl = findTable(dropCon.tableName, dropCon.owner);
+        if (tbl) {
+          tbl.constraints = tbl.constraints.filter(c => c.name !== dropCon.constraintName);
+          recomputeColumnFlags(tbl);
         }
         parseReport.parsed++;
         parseReport.byKind.alterDrop++;
-        continue;
+        handled = true;
       }
 
-      const alt = parseAlterTableConstraint(stripped);
-      if (alt) {
-        const existing = tableMap[alt.tableName] || (alt.owner && tableMap[`${alt.owner}.${alt.tableName}`]);
-        if (existing) {
-          existing.constraints.push(alt.constraint);
-          if (alt.constraint.constraintType === 'FOREIGN_KEY') {
-            for (const col of existing.columns) {
-              if (alt.constraint.columns.includes(col.name)) col.isForeignKey = true;
-            }
+      // --- DROP COLUMN ---
+      if (!handled) {
+        const dropCol = parseAlterTableDropColumn(stripped);
+        if (dropCol) {
+          const tbl = findTable(dropCol.tableName, dropCol.owner);
+          if (tbl) {
+            tbl.columns = tbl.columns.filter(c => !dropCol.columns.includes(c.name));
+            // Remove constraints that reference dropped columns
+            tbl.constraints = tbl.constraints.filter(c => {
+              if (!c.columns) return true;
+              return !c.columns.some(col => dropCol.columns.includes(col));
+            });
+            tbl.columnCount = tbl.columns.length;
+            // Recompute ordinal positions
+            tbl.columns.forEach((c, i) => { c.ordinalPosition = i + 1; });
+            recomputeColumnFlags(tbl);
           }
-          if (alt.constraint.constraintType === 'PRIMARY_KEY') {
-            for (const col of existing.columns) {
-              if (alt.constraint.columns.includes(col.name)) col.isPrimaryKey = true;
-            }
-            existing.hasPrimaryKey = true;
-          }
+          parseReport.parsed++;
+          parseReport.byKind.alterDropColumn++;
+          handled = true;
         }
-        parseReport.parsed++;
-        parseReport.byKind.alterAdd++;
-      } else {
+      }
+
+      // --- RENAME COLUMN ---
+      if (!handled) {
+        const renamCol = parseAlterTableRenameColumn(stripped);
+        if (renamCol) {
+          const tbl = findTable(renamCol.tableName, renamCol.owner);
+          if (tbl) {
+            const col = tbl.columns.find(c => c.name === renamCol.oldName);
+            if (col) col.name = renamCol.newName;
+            // Update constraint column references
+            for (const con of tbl.constraints) {
+              if (con.columns) {
+                con.columns = con.columns.map(c => c === renamCol.oldName ? renamCol.newName : c);
+              }
+            }
+            // Update comment map key
+            const ck = `${tbl.name}.${renamCol.oldName}`;
+            if (commentMap.columns[ck]) {
+              commentMap.columns[`${tbl.name}.${renamCol.newName}`] = commentMap.columns[ck];
+              delete commentMap.columns[ck];
+            }
+          }
+          parseReport.parsed++;
+          parseReport.byKind.alterRenameColumn++;
+          handled = true;
+        }
+      }
+
+      // --- ADD COLUMN(S) --- (must come before ADD CONSTRAINT since both start with ADD)
+      if (!handled) {
+        const addCol = parseAlterTableAddColumn(stripped);
+        if (addCol) {
+          const tbl = findTable(addCol.tableName, addCol.owner);
+          if (tbl) {
+            for (const newCol of addCol.columns) {
+              // Avoid duplicates (idempotent re-apply)
+              if (!tbl.columns.find(c => c.name === newCol.name)) {
+                newCol.ordinalPosition = tbl.columns.length + 1;
+                tbl.columns.push(newCol);
+              }
+            }
+            if (addCol.inlineConstraints.length) {
+              tbl.constraints.push(...addCol.inlineConstraints);
+            }
+            tbl.columnCount = tbl.columns.length;
+            recomputeColumnFlags(tbl);
+          }
+          parseReport.parsed++;
+          parseReport.byKind.alterAddColumn++;
+          handled = true;
+        }
+      }
+
+      // --- MODIFY COLUMN(S) ---
+      if (!handled) {
+        const modCol = parseAlterTableModifyColumn(stripped);
+        if (modCol) {
+          const tbl = findTable(modCol.tableName, modCol.owner);
+          if (tbl) {
+            for (const mod of modCol.modifications) {
+              const existing = tbl.columns.find(c => c.name === mod.name);
+              if (existing) {
+                // Merge changed properties (type, nullable, default, etc.)
+                if (mod.dataType && mod.dataType !== 'UNKNOWN') existing.dataType = mod.dataType;
+                if (mod.length != null) existing.length = mod.length;
+                if (mod.precision != null) existing.precision = mod.precision;
+                if (mod.scale != null) existing.scale = mod.scale;
+                if (mod.charSemantics) existing.charSemantics = mod.charSemantics;
+                // nullable: only override if MODIFY explicitly sets NOT NULL or NULL
+                existing.nullable = mod.nullable;
+                if (mod.defaultValue !== undefined) {
+                  existing.defaultValue = mod.defaultValue;
+                  existing.defaultKind = mod.defaultKind;
+                }
+                if (mod.isIdentity) {
+                  existing.isIdentity = true;
+                  existing.identityGeneration = mod.identityGeneration;
+                }
+                if (mod.isVirtual) {
+                  existing.isVirtual = true;
+                  existing.virtualExpression = mod.virtualExpression;
+                }
+              }
+            }
+          }
+          parseReport.parsed++;
+          parseReport.byKind.alterModifyColumn++;
+          handled = true;
+        }
+      }
+
+      // --- ADD CONSTRAINT (fallback) ---
+      if (!handled) {
+        const alt = parseAlterTableConstraint(stripped);
+        if (alt) {
+          const tbl = findTable(alt.tableName, alt.owner);
+          if (tbl) {
+            tbl.constraints.push(alt.constraint);
+            recomputeColumnFlags(tbl);
+          }
+          parseReport.parsed++;
+          parseReport.byKind.alterAdd++;
+          handled = true;
+        }
+      }
+
+      if (!handled) {
         recordSkip(stripped, 'alter_unparsed');
       }
     } else {
