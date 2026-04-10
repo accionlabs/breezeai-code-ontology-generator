@@ -70,8 +70,8 @@ function extractClassStatements(typeNode, source) {
       }
     }
   }
-  // NOTE: query_statement and api_call are NOT collected here.
-  // They are already captured inside each method's own statements.
+  // Scan struct/type body for query statements (SQL, Cypher, etc.)
+  collectQueryStatements(typeNode, source, statements);
   return statements;
 }
 

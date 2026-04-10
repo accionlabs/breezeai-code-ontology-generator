@@ -556,15 +556,22 @@ function extractFileStatements(filePath) {
     });
   }
 
-  // NOTE: query_statement and api_call are NOT collected here.
-  // They are already captured inside each function's and class's
-  // own statements. Collecting them here would cause duplicates.
+  // Scan the entire file for query statements (SQL, Cypher, etc.)
+  // so that module-scope constants and top-level declarations are captured.
+  // Function-body queries will also be picked up but are deduplicated by
+  // line range in collectQueryStatements's seen set, and Neo4j MERGE
+  // ensures no duplicate nodes.
+  collectQueryStatements(tree.rootNode, source, statements);
 
   return statements;
 }
 
 function collectQueryStatements(node, source, statements) {
-  const seen = new Set(statements.map(s => `${s.startLine}:${s.endLine}`));
+  const seen = new Set(
+    statements
+      .filter(s => s.type === 'query_statement' || s.type === 'db_method_call')
+      .map(s => `${s.startLine}:${s.endLine}`)
+  );
   const matchedRanges = [];
 
   traverse(node, (n) => {
@@ -593,7 +600,7 @@ function collectQueryStatements(node, source, statements) {
           seen.add(key);
           matchedRanges.push({ start: n.startIndex, end: n.endIndex });
           statements.push({
-            type: "query_statement", db,
+            type: "db_method_call", db,
             text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
             startLine: n.startPosition.row + 1,
             endLine: n.endPosition.row + 1,
@@ -606,19 +613,14 @@ function collectQueryStatements(node, source, statements) {
     if (n.type === "string" || n.type === "template_string") {
       const text = source.slice(n.startIndex, n.endIndex);
       if (containsDbQuery(text)) {
-        let parent = n.parent;
-        while (parent && parent !== node && parent.type !== "lexical_declaration" && parent.type !== "variable_declaration" && parent.type !== "expression_statement" && parent.type !== "assignment_expression") {
-          parent = parent.parent;
-        }
-        const contextNode = (parent && parent !== node) ? parent : n;
-        const key = `${contextNode.startPosition.row + 1}:${contextNode.endPosition.row + 1}`;
+        const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
         if (!seen.has(key)) {
           seen.add(key);
           statements.push({
             type: "query_statement",
-            text: source.slice(contextNode.startIndex, contextNode.endIndex).slice(0, 500),
-            startLine: contextNode.startPosition.row + 1,
-            endLine: contextNode.endPosition.row + 1,
+            text: text.slice(0, 500),
+            startLine: n.startPosition.row + 1,
+            endLine: n.endPosition.row + 1,
           });
         }
       }

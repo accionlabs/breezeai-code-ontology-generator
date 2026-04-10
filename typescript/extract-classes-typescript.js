@@ -45,9 +45,9 @@ function extractClassStatements(node, source) {
     });
   }
 
-  // NOTE: query_statement and api_call are NOT collected here.
-  // They are already captured inside each method's own statements.
-  // Collecting them here would cause duplicates.
+  // Scan class body for query statements (SQL, Cypher, etc.)
+  // so that class-level constants and property initializers are captured.
+  collectQueryStatements(node, source, statements);
 
   return statements;
 }

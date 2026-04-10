@@ -84,8 +84,8 @@ function parseSource(filePath, parser) {
  */
 const DB_METHOD_MAP = {
   sql: [
-    'query', 'rawQuery', 'raw', 'execute', 'exec', 'executeSql',
-    'prepare', 'prepareStatement', 'executeQuery', 'executeUpdate',
+    'rawQuery', 'executeSql',
+    'prepareStatement', 'executeQuery', 'executeUpdate',
   ],
   sequelize: [
     'findAll', 'findOne', 'findByPk', 'findOrCreate', 'findAndCountAll',
@@ -119,7 +119,7 @@ const DB_METHOD_MAP = {
     'mset', 'mget',
   ],
   dynamodb: [
-    'getItem', 'putItem', 'deleteItem', 'updateItem',
+    'putItem', 'deleteItem', 'updateItem',
     'batchGetItem', 'batchWriteItem', 'transactGetItems', 'transactWriteItems',
   ],
   elasticsearch: [
@@ -168,10 +168,20 @@ for (const [db, methods] of Object.entries(DB_METHOD_MAP)) {
 /** Database query language patterns */
 const QUERY_PATTERNS = [
   // SQL (MySQL, PostgreSQL, SQLite, MSSQL, Oracle)
-  /\b(SELECT|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE|MERGE|TRUNCATE)\b/i,
+  // Require structural context so bare English words like "select" or "update" don't false-match.
+  /\bSELECT\b[\s\S]{1,2000}\bFROM\s+(?!(?:a|an|the|this|that|these|those|my|your|our|its|his|her|their|some|any|each|every|all|no|another|below|above|within|inside|outside)\b)[a-zA-Z_`"\[]/i,  // SELECT ... FROM <table>
+  /\bINSERT\s+INTO\b.{1,2000}\b(VALUES|SELECT|SET)\b/is,       // INSERT INTO ... VALUES/SELECT
+  /\bUPDATE\b.{1,2000}\bSET\b/is,                              // UPDATE ... SET
+  /\bDELETE\s+FROM\b/i,                                        // DELETE FROM (already specific)
+  /\b(CREATE|ALTER|DROP)\s+TABLE\b/i,                           // DDL (already specific)
+  /\bMERGE\s+INTO\b/i,                                         // MERGE INTO (not bare MERGE)
+  /\bTRUNCATE\s+TABLE\b/i,                                     // TRUNCATE TABLE (not bare TRUNCATE)
+  /\b(?:EXEC|EXECUTE)\s+[a-zA-Z_]\w*/i,                        // T-SQL EXEC/EXECUTE stored proc
+  /\bCALL\s+[a-zA-Z_]\w*\s*\(/i,                               // CALL stored procedure
   // Neo4j Cypher — require graph-specific syntax context
-  /\b(MATCH|OPTIONAL\s+MATCH)\s*\(/i,                   // MATCH (...), OPTIONAL MATCH (...)
-  /\b(MATCH|CREATE|MERGE)\s*\([a-zA-Z0-9_]*:/i,         // MATCH (n:Label), CREATE (n:Label)
+  /\b(MATCH|OPTIONAL\s+MATCH)\s*(\(|[a-zA-Z_]\w*\s*=)/i, // MATCH (...), MATCH path = ..., OPTIONAL MATCH (...)
+  /\b(CREATE|MERGE)\s*\([a-zA-Z0-9_]*:/i,               // CREATE (n:Label), MERGE (n:Label)
+  /\bUNWIND\b.{1,200}\b(MERGE|CREATE|SET)\b/is,         // UNWIND $rows AS r MERGE/CREATE
   /\bDETACH\s+DELETE\b/i,                                // DETACH DELETE
   /\bLOAD\s+CSV\b/i,                                     // LOAD CSV
   // MongoDB aggregation string patterns (e.g. in raw commands)
