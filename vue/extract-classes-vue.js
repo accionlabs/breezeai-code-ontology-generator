@@ -8,6 +8,7 @@
 const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
 const { containsDbQuery, getDbFromMethod, getApiCallInfo, extractEndpointFromArgs } = require("../utils");
+const { collectQueryStatements } = require("./extract-functions-vue");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(JavaScript);
@@ -115,6 +116,9 @@ function extractClassStatements(node, source, lineOffset) {
       endLine: child.endPosition.row + 1 + lineOffset,
     });
   }
+
+  // Scan class body for query statements (SQL, Cypher, etc.)
+  collectQueryStatements(node, source, statements, lineOffset);
 
   return statements;
 }

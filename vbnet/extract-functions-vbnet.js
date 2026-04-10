@@ -546,7 +546,11 @@ function extractFileStatements(filePath) {
 }
 
 function collectQueryStatements(node, source, statements) {
-  const seen = new Set(statements.map(s => `${s.startLine}:${s.endLine}`));
+  const seen = new Set(
+    statements
+      .filter(s => s.type === 'query_statement' || s.type === 'db_method_call')
+      .map(s => `${s.startLine}:${s.endLine}`)
+  );
   traverse(node, (n) => {
     if (n.type === "invocation_expression" || n.type === "invocation") {
       const expr = n.child(0);
@@ -567,7 +571,7 @@ function collectQueryStatements(node, source, statements) {
         if (!seen.has(key)) {
           seen.add(key);
           statements.push({
-            type: "query_statement", db, method: methodName, object: objectName,
+            type: "db_method_call", db, method: methodName, object: objectName,
             text: source.slice(n.startIndex, n.endIndex).slice(0, 500),
             startLine: n.startPosition.row + 1, endLine: n.endPosition.row + 1,
           });
@@ -578,18 +582,13 @@ function collectQueryStatements(node, source, statements) {
     if (n.type === "string_literal") {
       const text = source.slice(n.startIndex, n.endIndex);
       if (containsDbQuery(text)) {
-        let parent = n.parent;
-        while (parent && parent !== node && parent.type !== "dim_statement" && parent.type !== "assignment_statement") {
-          parent = parent.parent;
-        }
-        const contextNode = (parent && parent !== node) ? parent : n;
-        const key = `${contextNode.startPosition.row + 1}:${contextNode.endPosition.row + 1}`;
+        const key = `${n.startPosition.row + 1}:${n.endPosition.row + 1}`;
         if (!seen.has(key)) {
           seen.add(key);
           statements.push({
             type: "query_statement",
-            text: source.slice(contextNode.startIndex, contextNode.endIndex).slice(0, 500),
-            startLine: contextNode.startPosition.row + 1, endLine: contextNode.endPosition.row + 1,
+            text: text.slice(0, 500),
+            startLine: n.startPosition.row + 1, endLine: n.endPosition.row + 1,
           });
         }
       }
