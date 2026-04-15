@@ -4,3 +4,6 @@ output/
 .DS_Store
 .env
 .claude
+breeze
+lmreborn
+.breeze.json

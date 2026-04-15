@@ -2,6 +2,7 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { execFileSync } = require("child_process");
 const {
   detectLanguages,
   processLanguage,
@@ -171,12 +172,18 @@ function getLlmOpts(llmPlatform) {
 }
 
 /**
- * Resolve the Git diff, fetch file contents from GitHub one at a time,
- * and write them directly to a temp dir (content never accumulates in memory).
+ * Resolve the Git diff between two commits via the GitHub API, fetch the
+ * changed file contents one at a time, and write them to a temp dir.
+ *
+ * Used for incremental (re-)analysis when the repo has already been parsed
+ * and we only need to process files that changed since `currentCommitId`.
+ *
+ * First-time analysis uses `cloneRepoFull()` below instead, to avoid the
+ * per-file GitHub API rate limit.
  *
  * @returns {{ tempDir: string, filterSet: Set<string>, deletedFiles: string[] }}
  */
-async function resolveGitDiff({ owner, repo, currentCommitId, incomingCommitId, gitBranch, gitToken }) {
+async function resolveGitDiff({ owner, repo, currentCommitId, incomingCommitId, gitToken }) {
   // Fetch full directory tree at incomingCommitId for path resolution
   const tree = await githubApi(
     `/repos/${owner}/${repo}/git/trees/${incomingCommitId}?recursive=1`,
@@ -186,71 +193,25 @@ async function resolveGitDiff({ owner, repo, currentCommitId, incomingCommitId, 
     .filter((entry) => entry.type === "blob")
     .map((entry) => entry.path);
 
-  let changedFilePaths = [];
-  let deletedFiles = [];
+  const comparison = await githubApi(
+    `/repos/${owner}/${repo}/compare/${currentCommitId}...${incomingCommitId}`,
+    gitToken
+  );
 
-  const hasCurrentCommit = currentCommitId && currentCommitId !== "null" && currentCommitId !== "undefined";
+  const ghFiles = comparison.files || [];
+  const deletedFiles = ghFiles
+    .filter((f) => f.status === "removed")
+    .map((f) => f.filename);
+  const changedFiles = ghFiles.filter((f) => f.status !== "removed");
 
-  if (hasCurrentCommit) {
-    const comparison = await githubApi(
-      `/repos/${owner}/${repo}/compare/${currentCommitId}...${incomingCommitId}`,
-      gitToken
-    );
-
-    const ghFiles = comparison.files || [];
-    deletedFiles = ghFiles
-      .filter((f) => f.status === "removed")
-      .map((f) => f.filename);
-    const changedFiles = ghFiles.filter((f) => f.status !== "removed");
-
-    if (changedFiles.length === 0) {
-      const err = new Error("No changed files found between the two commits");
-      err.statusCode = 422;
-      err.deletedFiles = deletedFiles;
-      throw err;
-    }
-
-    changedFilePaths = changedFiles.map((cf) => cf.filename);
-  } else {
-    console.log("No currentCommitId provided, fetching all files up to incomingCommitId on branch", gitBranch);
-    const repoInfo = await githubApi(`/repos/${owner}/${repo}`, gitToken);
-    const defaultBranch = repoInfo.default_branch;
-
-    const commits = await githubApi(
-      `/repos/${owner}/${repo}/commits?sha=${incomingCommitId}&per_page=1`,
-      gitToken
-    );
-
-    if (commits.length > 0) {
-      let comparison;
-      try {
-        comparison = await githubApi(
-          `/repos/${owner}/${repo}/compare/${defaultBranch}...${incomingCommitId}`,
-          gitToken
-        );
-      } catch (_) {
-        comparison = null;
-      }
-
-      if (comparison && comparison.files && comparison.files.length > 0) {
-        const ghFiles = comparison.files;
-        deletedFiles = ghFiles
-          .filter((f) => f.status === "removed")
-          .map((f) => f.filename);
-        changedFilePaths = ghFiles
-          .filter((f) => f.status !== "removed")
-          .map((f) => f.filename);
-      } else {
-        changedFilePaths = skeletonPaths;
-      }
-    }
-
-    if (changedFilePaths.length === 0) {
-      const err = new Error("No changed files found on the branch up to the specified commit");
-      err.statusCode = 422;
-      throw err;
-    }
+  if (changedFiles.length === 0) {
+    const err = new Error("No changed files found between the two commits");
+    err.statusCode = 422;
+    err.deletedFiles = deletedFiles;
+    throw err;
   }
+
+  const changedFilePaths = changedFiles.map((cf) => cf.filename);
 
   // Write skeleton placeholders + fetch changed files to temp dir
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ontology-"));
@@ -282,6 +243,85 @@ async function resolveGitDiff({ owner, repo, currentCommitId, incomingCommitId, 
   return { tempDir, filterSet, deletedFiles };
 }
 
+function countFilesExcludingGit(dir) {
+  let count = 0;
+  const stack = [dir];
+  while (stack.length) {
+    const cur = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(cur, { withFileTypes: true });
+    } catch (_) {
+      continue;
+    }
+    for (const e of entries) {
+      if (e.name === ".git") continue;
+      const full = path.join(cur, e.name);
+      if (e.isDirectory()) stack.push(full);
+      else if (e.isFile()) count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Clone the full repo at the given branch into a temp dir and check out
+ * `incomingCommitId`. Used for first-time analysis so we don't have to
+ * fetch every file through the GitHub API (which rate-limits quickly).
+ *
+ * The token, if provided, is injected only into the URL passed to `git`
+ * and is scrubbed from any error output before it leaves this function.
+ *
+ * @returns {{ tempDir: string }}
+ */
+async function cloneRepoFull({ owner, repo, incomingCommitId, gitBranch, gitToken }) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ontology-clone-"));
+  const authUrl = gitToken
+    ? `https://x-access-token:${gitToken}@github.com/${owner}/${repo}.git`
+    : `https://github.com/${owner}/${repo}.git`;
+
+  const scrub = (s) =>
+    String(s || "").replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@");
+
+  console.log(`Cloning ${owner}/${repo}@${gitBranch} into ${tempDir}`);
+
+  try {
+    execFileSync(
+      "git",
+      ["clone", "--branch", gitBranch, "--single-branch", authUrl, tempDir],
+      { stdio: ["ignore", "ignore", "pipe"] }
+    );
+
+    const afterCloneCount = countFilesExcludingGit(tempDir);
+    console.log(`Clone complete — ${afterCloneCount} files on branch ${gitBranch}`);
+
+    // Check out the requested commit (usually HEAD of the branch — this is a
+    // no-op in that case, but covers requests for an older commit on-branch).
+    if (incomingCommitId) {
+      execFileSync("git", ["-C", tempDir, "checkout", "--quiet", incomingCommitId], {
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      const afterCheckoutCount = countFilesExcludingGit(tempDir);
+      console.log(
+        `Checked out ${incomingCommitId} — ${afterCheckoutCount} files on disk`
+      );
+    }
+  } catch (err) {
+    const stderr = err.stderr ? err.stderr.toString() : "";
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    throw new Error(`git clone failed: ${scrub(stderr || err.message)}`);
+  }
+
+  // Drop .git — parser doesn't need it, and it would inflate detectLanguages/walks.
+  try {
+    fs.rmSync(path.join(tempDir, ".git"), { recursive: true, force: true });
+  } catch (_) {
+    // best-effort
+  }
+
+  return { tempDir };
+}
+
 /**
  * Streaming analysis for diff mode: writes NDJSON.gz directly to S3.
  * No local JSON assembly — each file node streams through gzip to S3.
@@ -290,7 +330,11 @@ async function resolveGitDiff({ owner, repo, currentCommitId, incomingCommitId, 
  */
 async function runAnalysisDiffStream({ tempDir, filterSet, s3Key, repo }) {
   try {
-    if (filterSet.size === 0) {
+    // filterSet is a Set<string> in incremental (API-diff) mode — restrict which
+    // files' records are written. In full-clone mode it's null/undefined, meaning
+    // "emit every parsed file" (mergeLanguageOutputs treats falsy filterPaths as
+    // no filter).
+    if (filterSet && filterSet.size === 0) {
       const err = new Error("No readable files could be fetched from GitHub");
       err.statusCode = 422;
       throw err;
@@ -425,9 +469,28 @@ app.post("/api/analyze-diff", async (req, res) => {
   const { owner, repo } = parsed;
 
   try {
-    const { tempDir, filterSet, deletedFiles } = await resolveGitDiff({
-      owner, repo, currentCommitId, incomingCommitId, gitBranch, gitToken,
-    });
+    const hasCurrentCommit =
+      currentCommitId &&
+      currentCommitId !== "null" &&
+      currentCommitId !== "undefined";
+
+    let tempDir;
+    let filterSet;
+    let deletedFiles;
+
+    if (hasCurrentCommit) {
+      // Repo already parsed — pull only the diff through the GitHub API.
+      ({ tempDir, filterSet, deletedFiles } = await resolveGitDiff({
+        owner, repo, currentCommitId, incomingCommitId, gitToken,
+      }));
+    } else {
+      // First-time analysis — use `git clone` to bypass GitHub API rate limits.
+      ({ tempDir } = await cloneRepoFull({
+        owner, repo, incomingCommitId, gitBranch, gitToken,
+      }));
+      filterSet = null;   // process every file in the repo
+      deletedFiles = [];
+    }
 
     const llmPlatform = req.query.llmPlatform || "AWSBEDROCK";
     const s3Key = `code-ontology/${projectUuid}/${incomingCommitId}.ndjson.gz`;
