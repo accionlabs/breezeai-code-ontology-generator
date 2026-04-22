@@ -103,7 +103,10 @@ function buildAuthCloneUrl({ provider, owner, repo, gitToken }) {
       err.statusCode = 400;
       throw err;
     }
-    return `https://${gitToken}@bitbucket.org/${owner}/${repo}.git`;
+    const colonIdx = gitToken.indexOf(":");
+    const user = gitToken.slice(0, colonIdx);
+    const pass = gitToken.slice(colonIdx + 1);
+    return `https://x-bitbucket-api-token-auth:${pass}@bitbucket.org/${owner}/${repo}.git`;
   }
   throw new Error(`Unsupported git provider: ${provider}`);
 }
@@ -408,14 +411,12 @@ function countFilesExcludingGit(dir) {
  */
 async function cloneRepoFull({ provider, owner, repo, incomingCommitId, gitBranch, gitToken }) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ontology-clone-"));
-  const authUrl = buildAuthCloneUrl({ provider, owner, repo, gitToken });
-  console.log("this is auth url:", authUrl);
-
   // Scrub any embedded credentials before they hit logs/error messages.
   const scrub = (s) =>
-    String(s || "").replace(/\/\/[^/@\s]+@/g, "//***@");
+    String(s || "").replace(/\/\/[^/@\s]+:[^/@\s]+@/g, "//***:***@");
 
-  console.log(`Cloning ${provider}:${owner}/${repo}@${gitBranch} into ${tempDir}`);
+  const authUrl = buildAuthCloneUrl({ provider, owner, repo, gitToken });
+  console.log(`Cloning ${provider}:${owner}/${repo}@${gitBranch} into ${tempDir}, authUrl: ${scrub(authUrl)}`);
 
   try {
     execFileSync(
