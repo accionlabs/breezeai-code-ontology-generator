@@ -2,6 +2,7 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { execFileSync } = require("child_process");
 const {
   detectLanguages,
   processLanguage,
@@ -20,12 +21,28 @@ app.use(express.json({ limit: "50mb" }));
 
 // --- Helpers ---
 
-function parseGitHubRepo(repoUrl) {
-  const match = repoUrl.match(
-    /github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/
-  );
-  if (!match) return null;
-  return { owner: match[1], repo: match[2] };
+function parseRepoUrl(repoUrl) {
+  const gh = repoUrl.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/);
+  if (gh) return { provider: "github", owner: gh[1], repo: gh[2] };
+
+  const bb = repoUrl.match(/bitbucket\.org\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/);
+  if (bb) return { provider: "bitbucket", owner: bb[1], repo: bb[2] };
+
+  return null;
+}
+
+function bitbucketAuthHeader(credential) {
+  if (!credential) return null;
+  // Bitbucket auth uses API keys via Basic auth. Credential format is
+  // "username:api_key" (or "email:api_token" for Atlassian API tokens).
+  if (!credential.includes(":")) {
+    const err = new Error(
+      'Bitbucket credential must be in "username:api_key" format (API key via Basic auth).'
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+  return `Basic ${Buffer.from(credential).toString("base64")}`;
 }
 
 async function githubApi(endpoint, token) {
@@ -39,6 +56,59 @@ async function githubApi(endpoint, token) {
     throw new Error(`GitHub API ${res.status}: ${body}`);
   }
   return res.json();
+}
+
+async function bitbucketApi(endpointOrUrl, token) {
+  const headers = { Accept: "application/json" };
+  const auth = bitbucketAuthHeader(token);
+  if (auth) headers.Authorization = auth;
+  const url = endpointOrUrl.startsWith("http")
+    ? endpointOrUrl
+    : `https://api.bitbucket.org${endpointOrUrl}`;
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Bitbucket API ${res.status}: ${body}`);
+  }
+  return res.json();
+}
+
+async function bitbucketRawFile({ owner, repo, filePath, commitId, gitToken }) {
+  const headers = {};
+  const auth = bitbucketAuthHeader(gitToken);
+  if (auth) headers.Authorization = auth;
+  const encodedPath = filePath.split("/").map(encodeURIComponent).join("/");
+  const url = `https://api.bitbucket.org/2.0/repositories/${owner}/${repo}/src/${commitId}/${encodedPath}`;
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Bitbucket src ${res.status}: ${body}`);
+  }
+  return res.text();
+}
+
+function buildAuthCloneUrl({ provider, owner, repo, gitToken }) {
+  if (provider === "github") {
+    return gitToken
+      ? `https://x-access-token:${gitToken}@github.com/${owner}/${repo}.git`
+      : `https://github.com/${owner}/${repo}.git`;
+  }
+  if (provider === "bitbucket") {
+    if (!gitToken) return `https://bitbucket.org/${owner}/${repo}.git`;
+    // API key via Basic auth — credential must be "username:api_key".
+    if (!gitToken.includes(":")) {
+      const err = new Error(
+        'Bitbucket credential must be in "username:api_key" format (API key via Basic auth).'
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+    const colonIdx = gitToken.indexOf(":");
+    const user = gitToken.slice(0, colonIdx);
+    const pass = gitToken.slice(colonIdx + 1);
+    return `https://x-bitbucket-api-token-auth:${pass}@bitbucket.org/${owner}/${repo}.git`;
+  }
+  throw new Error(`Unsupported git provider: ${provider}`);
 }
 
 async function runAnalysis(files, projectName, skeletonPaths, { keepTempDir = false } = {}) {
@@ -170,89 +240,117 @@ function getLlmOpts(llmPlatform) {
   return platformMap[platform] || platformMap.AWSBEDROCK;
 }
 
+// --- Provider-specific tree / compare / content fetchers ---
+
+async function ghTree({ owner, repo, commitId, gitToken }) {
+  const tree = await githubApi(
+    `/repos/${owner}/${repo}/git/trees/${commitId}?recursive=1`,
+    gitToken
+  );
+  return (tree.tree || []).filter((e) => e.type === "blob").map((e) => e.path);
+}
+
+async function ghCompare({ owner, repo, currentCommitId, incomingCommitId, gitToken }) {
+  const cmp = await githubApi(
+    `/repos/${owner}/${repo}/compare/${currentCommitId}...${incomingCommitId}`,
+    gitToken
+  );
+  const files = cmp.files || [];
+  return {
+    deleted: files.filter((f) => f.status === "removed").map((f) => f.filename),
+    changed: files.filter((f) => f.status !== "removed").map((f) => f.filename),
+  };
+}
+
+async function ghContent({ owner, repo, filePath, commitId, gitToken }) {
+  const data = await githubApi(
+    `/repos/${owner}/${repo}/contents/${encodeURIComponent(filePath)}?ref=${commitId}`,
+    gitToken
+  );
+  return Buffer.from(data.content, "base64").toString("utf-8");
+}
+
+async function bbTree({ owner, repo, commitId, gitToken }) {
+  // Bitbucket's src endpoint with max_depth gives a recursive listing across
+  // pages. Filter to commit_file (blobs) only.
+  const paths = [];
+  let next =
+    `/2.0/repositories/${owner}/${repo}/src/${commitId}/` +
+    `?pagelen=100&max_depth=100`;
+  while (next) {
+    const page = await bitbucketApi(next, gitToken);
+    for (const entry of page.values || []) {
+      if (entry.type === "commit_file" && entry.path) paths.push(entry.path);
+    }
+    next = page.next || null;
+  }
+  return paths;
+}
+
+async function bbCompare({ owner, repo, currentCommitId, incomingCommitId, gitToken }) {
+  // Bitbucket diffstat spec is `{destination}..{source}` — using
+  // `{incoming}..{current}` mirrors GitHub's `compare/{base}...{head}`:
+  // status "removed" = file existed in current but not in incoming.
+  const deleted = [];
+  const changed = [];
+  let next =
+    `/2.0/repositories/${owner}/${repo}/diffstat/` +
+    `${incomingCommitId}..${currentCommitId}?pagelen=100`;
+  while (next) {
+    const page = await bitbucketApi(next, gitToken);
+    for (const entry of page.values || []) {
+      const newPath = entry.new && entry.new.path;
+      const oldPath = entry.old && entry.old.path;
+      if (entry.status === "removed" && oldPath) {
+        deleted.push(oldPath);
+      } else if (newPath) {
+        changed.push(newPath);
+        if (entry.status === "renamed" && oldPath && oldPath !== newPath) {
+          deleted.push(oldPath);
+        }
+      }
+    }
+    next = page.next || null;
+  }
+  return { deleted, changed };
+}
+
+async function bbContent({ owner, repo, filePath, commitId, gitToken }) {
+  return bitbucketRawFile({ owner, repo, filePath, commitId, gitToken });
+}
+
+function providerApi(provider) {
+  if (provider === "github") return { tree: ghTree, compare: ghCompare, content: ghContent };
+  if (provider === "bitbucket") return { tree: bbTree, compare: bbCompare, content: bbContent };
+  throw new Error(`Unsupported git provider: ${provider}`);
+}
+
 /**
- * Resolve the Git diff, fetch file contents from GitHub one at a time,
- * and write them directly to a temp dir (content never accumulates in memory).
+ * Resolve the Git diff between two commits via the provider's REST API,
+ * fetch the changed file contents one at a time, and write them to a temp
+ * dir. Used for incremental (re-)analysis when the repo has already been
+ * parsed and we only need to process files that changed since `currentCommitId`.
+ *
+ * First-time analysis uses `cloneRepoFull()` below instead, to avoid the
+ * per-file API rate limits.
  *
  * @returns {{ tempDir: string, filterSet: Set<string>, deletedFiles: string[] }}
  */
-async function resolveGitDiff({ owner, repo, currentCommitId, incomingCommitId, gitBranch, gitToken }) {
-  // Fetch full directory tree at incomingCommitId for path resolution
-  const tree = await githubApi(
-    `/repos/${owner}/${repo}/git/trees/${incomingCommitId}?recursive=1`,
-    gitToken
-  );
-  const skeletonPaths = (tree.tree || [])
-    .filter((entry) => entry.type === "blob")
-    .map((entry) => entry.path);
+async function resolveGitDiff({ provider, owner, repo, currentCommitId, incomingCommitId, gitToken }) {
+  const api = providerApi(provider);
 
-  let changedFilePaths = [];
-  let deletedFiles = [];
+  const skeletonPaths = await api.tree({ owner, repo, commitId: incomingCommitId, gitToken });
+  const { changed, deleted } = await api.compare({
+    owner, repo, currentCommitId, incomingCommitId, gitToken,
+  });
 
-  const hasCurrentCommit = currentCommitId && currentCommitId !== "null" && currentCommitId !== "undefined";
-
-  if (hasCurrentCommit) {
-    const comparison = await githubApi(
-      `/repos/${owner}/${repo}/compare/${currentCommitId}...${incomingCommitId}`,
-      gitToken
-    );
-
-    const ghFiles = comparison.files || [];
-    deletedFiles = ghFiles
-      .filter((f) => f.status === "removed")
-      .map((f) => f.filename);
-    const changedFiles = ghFiles.filter((f) => f.status !== "removed");
-
-    if (changedFiles.length === 0) {
-      const err = new Error("No changed files found between the two commits");
-      err.statusCode = 422;
-      err.deletedFiles = deletedFiles;
-      throw err;
-    }
-
-    changedFilePaths = changedFiles.map((cf) => cf.filename);
-  } else {
-    console.log("No currentCommitId provided, fetching all files up to incomingCommitId on branch", gitBranch);
-    const repoInfo = await githubApi(`/repos/${owner}/${repo}`, gitToken);
-    const defaultBranch = repoInfo.default_branch;
-
-    const commits = await githubApi(
-      `/repos/${owner}/${repo}/commits?sha=${incomingCommitId}&per_page=1`,
-      gitToken
-    );
-
-    if (commits.length > 0) {
-      let comparison;
-      try {
-        comparison = await githubApi(
-          `/repos/${owner}/${repo}/compare/${defaultBranch}...${incomingCommitId}`,
-          gitToken
-        );
-      } catch (_) {
-        comparison = null;
-      }
-
-      if (comparison && comparison.files && comparison.files.length > 0) {
-        const ghFiles = comparison.files;
-        deletedFiles = ghFiles
-          .filter((f) => f.status === "removed")
-          .map((f) => f.filename);
-        changedFilePaths = ghFiles
-          .filter((f) => f.status !== "removed")
-          .map((f) => f.filename);
-      } else {
-        changedFilePaths = skeletonPaths;
-      }
-    }
-
-    if (changedFilePaths.length === 0) {
-      const err = new Error("No changed files found on the branch up to the specified commit");
-      err.statusCode = 422;
-      throw err;
-    }
+  if (changed.length === 0) {
+    const err = new Error("No changed files found between the two commits");
+    err.statusCode = 422;
+    err.deletedFiles = deleted;
+    throw err;
   }
 
-  // Write skeleton placeholders + fetch changed files to temp dir
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ontology-"));
   console.log(`Temp directory created: ${tempDir}`);
 
@@ -263,13 +361,11 @@ async function resolveGitDiff({ owner, repo, currentCommitId, incomingCommitId, 
   }
 
   const filterSet = new Set();
-  for (const filePath of changedFilePaths) {
+  for (const filePath of changed) {
     try {
-      const contentData = await githubApi(
-        `/repos/${owner}/${repo}/contents/${encodeURIComponent(filePath)}?ref=${incomingCommitId}`,
-        gitToken
-      );
-      const content = Buffer.from(contentData.content, "base64").toString("utf-8");
+      const content = await api.content({
+        owner, repo, filePath, commitId: incomingCommitId, gitToken,
+      });
       const fullPath = path.join(tempDir, filePath);
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       fs.writeFileSync(fullPath, content);
@@ -279,7 +375,84 @@ async function resolveGitDiff({ owner, repo, currentCommitId, incomingCommitId, 
     }
   }
 
-  return { tempDir, filterSet, deletedFiles };
+  return { tempDir, filterSet, deletedFiles: deleted };
+}
+
+function countFilesExcludingGit(dir) {
+  let count = 0;
+  const stack = [dir];
+  while (stack.length) {
+    const cur = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(cur, { withFileTypes: true });
+    } catch (_) {
+      continue;
+    }
+    for (const e of entries) {
+      if (e.name === ".git") continue;
+      const full = path.join(cur, e.name);
+      if (e.isDirectory()) stack.push(full);
+      else if (e.isFile()) count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Clone the full repo at the given branch into a temp dir and check out
+ * `incomingCommitId`. Used for first-time analysis so we don't have to
+ * fetch every file through the GitHub API (which rate-limits quickly).
+ *
+ * The token, if provided, is injected only into the URL passed to `git`
+ * and is scrubbed from any error output before it leaves this function.
+ *
+ * @returns {{ tempDir: string }}
+ */
+async function cloneRepoFull({ provider, owner, repo, incomingCommitId, gitBranch, gitToken }) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ontology-clone-"));
+  // Scrub any embedded credentials before they hit logs/error messages.
+  const scrub = (s) =>
+    String(s || "").replace(/\/\/[^/@\s]+:[^/@\s]+@/g, "//***:***@");
+
+  const authUrl = buildAuthCloneUrl({ provider, owner, repo, gitToken });
+  console.log(`Cloning ${provider}:${owner}/${repo}@${gitBranch} into ${tempDir}, authUrl: ${scrub(authUrl)}`);
+
+  try {
+    execFileSync(
+      "git",
+      ["clone", "--branch", gitBranch, "--single-branch", authUrl, tempDir],
+      { stdio: ["ignore", "ignore", "pipe"] }
+    );
+
+    const afterCloneCount = countFilesExcludingGit(tempDir);
+    console.log(`Clone complete — ${afterCloneCount} files on branch ${gitBranch}`);
+
+    // Check out the requested commit (usually HEAD of the branch — this is a
+    // no-op in that case, but covers requests for an older commit on-branch).
+    if (incomingCommitId) {
+      execFileSync("git", ["-C", tempDir, "checkout", "--quiet", incomingCommitId], {
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      const afterCheckoutCount = countFilesExcludingGit(tempDir);
+      console.log(
+        `Checked out ${incomingCommitId} — ${afterCheckoutCount} files on disk`
+      );
+    }
+  } catch (err) {
+    const stderr = err.stderr ? err.stderr.toString() : "";
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    throw new Error(`git clone failed: ${scrub(stderr || err.message)}`);
+  }
+
+  // Drop .git — parser doesn't need it, and it would inflate detectLanguages/walks.
+  try {
+    fs.rmSync(path.join(tempDir, ".git"), { recursive: true, force: true });
+  } catch (_) {
+    // best-effort
+  }
+
+  return { tempDir };
 }
 
 /**
@@ -290,7 +463,11 @@ async function resolveGitDiff({ owner, repo, currentCommitId, incomingCommitId, 
  */
 async function runAnalysisDiffStream({ tempDir, filterSet, s3Key, repo }) {
   try {
-    if (filterSet.size === 0) {
+    // filterSet is a Set<string> in incremental (API-diff) mode — restrict which
+    // files' records are written. In full-clone mode it's null/undefined, meaning
+    // "emit every parsed file" (mergeLanguageOutputs treats falsy filterPaths as
+    // no filter).
+    if (filterSet && filterSet.size === 0) {
       const err = new Error("No readable files could be fetched from GitHub");
       err.statusCode = 422;
       throw err;
@@ -418,16 +595,37 @@ app.post("/api/analyze-diff", async (req, res) => {
     });
   }
 
-  const parsed = parseGitHubRepo(repoUrl);
+  const parsed = parseRepoUrl(repoUrl);
   if (!parsed) {
-    return res.status(400).json({ error: "Invalid GitHub repo URL" });
+    return res.status(400).json({
+      error: "Invalid repo URL (supported hosts: github.com, bitbucket.org)",
+    });
   }
-  const { owner, repo } = parsed;
+  const { provider, owner, repo } = parsed;
 
   try {
-    const { tempDir, filterSet, deletedFiles } = await resolveGitDiff({
-      owner, repo, currentCommitId, incomingCommitId, gitBranch, gitToken,
-    });
+    const hasCurrentCommit =
+      currentCommitId &&
+      currentCommitId !== "null" &&
+      currentCommitId !== "undefined";
+
+    let tempDir;
+    let filterSet;
+    let deletedFiles;
+
+    if (hasCurrentCommit) {
+      // Repo already parsed — pull only the diff through the provider API.
+      ({ tempDir, filterSet, deletedFiles } = await resolveGitDiff({
+        provider, owner, repo, currentCommitId, incomingCommitId, gitToken,
+      }));
+    } else {
+      // First-time analysis — use `git clone` to bypass provider API rate limits.
+      ({ tempDir } = await cloneRepoFull({
+        provider, owner, repo, incomingCommitId, gitBranch, gitToken,
+      }));
+      filterSet = null;   // process every file in the repo
+      deletedFiles = [];
+    }
 
     const llmPlatform = req.query.llmPlatform || "AWSBEDROCK";
     const s3Key = `code-ontology/${projectUuid}/${incomingCommitId}.ndjson.gz`;

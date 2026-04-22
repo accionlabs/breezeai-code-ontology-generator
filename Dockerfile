@@ -2,8 +2,9 @@ FROM node:20-alpine
 
 WORKDIR /usr/src/app
 
-# Install build tools
+# Install build tools (git is used to clone repos on first-time analysis)
 RUN apk add --no-cache \
+    git \
     python3 \
     make \
     g++ \

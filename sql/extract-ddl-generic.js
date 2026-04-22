@@ -37,6 +37,31 @@ function unwrapName(node) {
   return null;
 }
 
+function sameColList(a, b) {
+  const aa = (a || []).map(x => String(x).toUpperCase()).sort();
+  const bb = (b || []).map(x => String(x).toUpperCase()).sort();
+  if (aa.length !== bb.length) return false;
+  for (let i = 0; i < aa.length; i++) if (aa[i] !== bb[i]) return false;
+  return true;
+}
+
+/**
+ * Semantic equality: same type, same column set, and (for FKs) same ref
+ * table + column set. Constraint name is intentionally ignored so an FK
+ * defined inline in CREATE TABLE and then re-declared via ALTER TABLE
+ * ADD CONSTRAINT is treated as a single constraint.
+ */
+function constraintsEquivalent(a, b) {
+  if (!a || !b) return false;
+  if (a.constraintType !== b.constraintType) return false;
+  if (!sameColList(a.columns, b.columns)) return false;
+  if (a.constraintType === 'FOREIGN_KEY') {
+    if ((a.refTableName || '').toUpperCase() !== (b.refTableName || '').toUpperCase()) return false;
+    if (!sameColList(a.refColumns, b.refColumns)) return false;
+  }
+  return true;
+}
+
 function upper(s) {
   return s == null ? null : String(s).toUpperCase();
 }
@@ -340,6 +365,7 @@ function parseGenericDDL(ddlText, dialect) {
         for (const { tableName, constraint } of adds) {
           const t = tableMap[tableName];
           if (t) {
+            if (t.constraints.some(c => constraintsEquivalent(c, constraint))) continue;
             t.constraints.push(constraint);
             if (constraint.constraintType === 'FOREIGN_KEY') {
               for (const col of t.columns) {

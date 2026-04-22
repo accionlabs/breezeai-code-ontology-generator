@@ -218,6 +218,31 @@ function splitColList(str) {
   return out;
 }
 
+/**
+ * Semantic equality for two constraints: same type, same column set, and
+ * (for foreign keys) same referenced table + column set. Constraint name is
+ * intentionally ignored so that an FK defined inline in CREATE TABLE and then
+ * re-declared via ALTER TABLE ADD CONSTRAINT is treated as one constraint.
+ */
+function sameColList(a, b) {
+  const aa = (a || []).map(x => String(x).toUpperCase()).sort();
+  const bb = (b || []).map(x => String(x).toUpperCase()).sort();
+  if (aa.length !== bb.length) return false;
+  for (let i = 0; i < aa.length; i++) if (aa[i] !== bb[i]) return false;
+  return true;
+}
+
+function constraintsEquivalent(a, b) {
+  if (!a || !b) return false;
+  if (a.constraintType !== b.constraintType) return false;
+  if (!sameColList(a.columns, b.columns)) return false;
+  if (a.constraintType === 'FOREIGN_KEY') {
+    if ((a.refTableName || '').toUpperCase() !== (b.refTableName || '').toUpperCase()) return false;
+    if (!sameColList(a.refColumns, b.refColumns)) return false;
+  }
+  return true;
+}
+
 // -----------------------------------------------------------
 // Column definition parser
 // -----------------------------------------------------------
@@ -1434,8 +1459,11 @@ function parseOracleDDL(ddlText) {
         if (alt) {
           const tbl = findTable(alt.tableName, alt.owner);
           if (tbl) {
-            tbl.constraints.push(alt.constraint);
-            recomputeColumnFlags(tbl);
+            const dup = tbl.constraints.some(c => constraintsEquivalent(c, alt.constraint));
+            if (!dup) {
+              tbl.constraints.push(alt.constraint);
+              recomputeColumnFlags(tbl);
+            }
           }
           parseReport.parsed++;
           parseReport.byKind.alterAdd++;
