@@ -11,59 +11,19 @@ const fs = require("fs");
 const path = require("path");
 const glob = require("glob");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
+const { parseFile } = require("./parser");
+const Parser = require("tree-sitter");
 
-let parser = null;
 let Perl = null;
+let parser = null;
 
-async function initParser() {
-  if (!parser) {
-    const Parser = require("tree-sitter");
-    Perl = await import("tree-sitter-perl");
+async function getParser() {
+  if (!Perl) {
+    Perl = (await import("tree-sitter-perl")).default;
     parser = new Parser();
-    parser.setLanguage(Perl.default);
+    parser.setLanguage(Perl);
   }
   return parser;
-}
-
-async function buildPackageMapper(repoPath, perlFiles) {
-  await initParser();
-  const mapper = {};
-
-  for (const file of perlFiles) {
-    try {
-      const code = fs.readFileSync(file, "utf8").replace(/\0/g, "");
-      if (!code?.trim()) continue;
-
-      const tree = parser.parse(code);
-      traverse(tree.rootNode, (node) => {
-        if (node.type === "package_statement") {
-          const pkgNode =
-            node.childForFieldName("namespace") ||
-            node.namedChildren.find((n) => n.type === "package_name") ||
-            node.namedChildren.find((n) => n.type === "identifier");
-          if (pkgNode) {
-            const pkgName = code
-              .slice(pkgNode.startIndex, pkgNode.endIndex)
-              .trim();
-            if (pkgName && !pkgName.startsWith("version")) {
-              mapper[pkgName] = path.relative(repoPath, file);
-            }
-          }
-        }
-      });
-    } catch (err) {
-      // Skip files that fail to parse
-    }
-  }
-
-  return mapper;
-}
-
-function traverse(node, cb) {
-  cb(node);
-  for (let i = 0; i < node.namedChildCount; i++) {
-    traverse(node.namedChild(i), cb);
-  }
 }
 
 // -------------------------------------------------------------
@@ -73,44 +33,16 @@ function getPerlFiles(repoPath, ignorePatterns = null) {
   const patterns =
     ignorePatterns ||
     getIgnorePatternsWithPrefix(repoPath, { language: "perl" });
-  return glob.sync(`${repoPath}/**/*.{pm,pl}`, {
+  return glob.sync(`${repoPath}/**/*.{pm,pl,t,pgsi}`, {
     ignore: patterns,
   });
-}
-
-// -------------------------------------------------------------
-// Resolve Perl import paths
-// -------------------------------------------------------------
-function resolveImportPath(importSource, currentFilePath, repoPath) {
-  if (!importSource) return null;
-
-  if (importSource.startsWith(".")) {
-    return null;
-  }
-
-  const currentDir = path.dirname(currentFilePath);
-  const modulePath = importSource.replace(/::/g, "/");
-
-  const possiblePaths = [
-    path.resolve(currentDir, modulePath + ".pm"),
-    path.resolve(currentDir, modulePath, "__init__.pm"),
-    path.resolve(repoPath, "lib", modulePath + ".pm"),
-    path.resolve(repoPath, "lib", modulePath, "__init__.pm"),
-  ];
-
-  for (const resolvedPath of possiblePaths) {
-    if (fs.existsSync(resolvedPath)) {
-      return path.relative(repoPath, resolvedPath);
-    }
-  }
-
-  return null;
 }
 
 // -------------------------------------------------------------
 // Analyze files with functions and packages
 // -------------------------------------------------------------
 async function analyzeFiles(repoPath, opts = {}) {
+  await getParser();
   const perlFiles = getPerlFiles(repoPath);
   const results = opts.onResult ? null : [];
   const totalFiles = perlFiles.length;
@@ -120,24 +52,8 @@ async function analyzeFiles(repoPath, opts = {}) {
 
   console.log(`\n📊 Total files to process: ${totalFiles}\n`);
 
-  const {
-    extractFunctionsAndCalls,
-    extractImports,
-    extractFileStatements,
-    initParser: initExtParser,
-  } = require("./extract-functions-perl");
-  const {
-    extractPackages,
-    initParser: initClassParser,
-  } = require("./extract-classes-perl");
-
-  await Promise.all([initExtParser(), initClassParser()]);
-
-  const packageMapper = await buildPackageMapper(repoPath, perlFiles);
-
-  for (let i = 0; i < perlFiles.length; i++) {
+  for (let i = 0; i < perlFiles.length; i++) {  
     const file = perlFiles[i];
-
     try {
       const percentage = ((i / totalFiles) * 100).toFixed(1);
       const spinner = spinnerFrames[spinnerIndex % spinnerFrames.length];
@@ -148,64 +64,17 @@ async function analyzeFiles(repoPath, opts = {}) {
       );
       spinnerIndex++;
 
-      const imports = await extractImports(file);
-      const importFiles = [];
-      const externalImports = [];
-      const libPaths = [];
-
-      imports.forEach((imp) => {
-        if (imp.isLib) {
-          libPaths.push(imp.source);
-        } else if (imp.source) {
-          if (packageMapper[imp.source]) {
-            importFiles.push(packageMapper[imp.source]);
-          } else {
-            const resolved = resolveImportPath(imp.source, file, repoPath);
-            if (resolved) {
-              importFiles.push(resolved);
-            } else {
-              externalImports.push(imp.source);
-            }
-          }
-        }
-      });
-
-      const functions = await extractFunctionsAndCalls(
-        file,
-        repoPath,
-        packageMapper,
-        opts.captureSourceCode,
-        opts.captureStatements,
-      );
-      const packages = await extractPackages(
-        file,
-        repoPath,
-        opts.captureStatements,
-      );
-      const statements = opts.captureStatements
-        ? await extractFileStatements(file)
-        : [];
-
-      const fileResult = {
-        path: path.relative(repoPath, file),
-        importFiles: [...new Set(importFiles)],
-        externalImports: [...new Set(externalImports)],
-        libPaths: [...new Set(libPaths)],
-        functions,
-        classes: packages,
-        statements,
-      };
-
+      const parseOut = parseFile(file, parser)
       if (opts.onResult) {
-        opts.onResult(fileResult);
+        opts.onResult(parseOut);
       } else {
-        results.push(fileResult);
+        results.push(parseOut);
       }
     } catch (e) {
       process.stdout.write("\n");
       console.log(`❌ Error analyzing file: ${file} - ${e.message}`);
     }
-  }
+  };
 
   process.stdout.write("\r" + " ".repeat(150) + "\r");
   console.log(`✅ Completed processing ${totalFiles} files\n`);
