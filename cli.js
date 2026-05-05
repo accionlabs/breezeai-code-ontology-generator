@@ -56,6 +56,17 @@ program
     await run(opts);
   });
 
+// repo-to-sql-tree command
+program
+  .command("repo-to-sql-tree")
+  .description("Analyze .sql files in a repository and generate a DDL ontology")
+  .requiredOption("-r, --repo <path>", "Path to the repository to analyze")
+  .requiredOption("-o, --out <path>", "Output directory for generated files")
+  .action(async (opts) => {
+    const { runSql } = require("./index");
+    await runSql(opts);
+  });
+
 // upload-docs command
 program
   .command("upload-docs")

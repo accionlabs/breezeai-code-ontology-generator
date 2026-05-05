@@ -6,6 +6,7 @@ const https = require("https");
 const http = require("http");
 const url = require("url");
 const { autoDetectAndProcess, generateDescriptions, addMetadata } = require("./main");
+const { processSqlRepo } = require("./sql/sql-orchestrator");
 
 const allowedLanguages = ["perl", "javascript", "python", "java", "typescript", "php", "vbnet", "vue"];
 
@@ -253,4 +254,23 @@ async function uploadGeneratedFiles(outputDir, opts) {
   }
 }
 
-module.exports = { run };
+async function runSql(opts) {
+  const repoPath = path.resolve(opts.repo);
+  const outputDir = path.resolve(opts.out);
+
+  if (!fs.existsSync(repoPath)) {
+    console.error(`❌ Repo path does not exist: ${repoPath}`);
+    process.exit(1);
+  }
+
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  const result = await processSqlRepo(repoPath, outputDir);
+  if (!result.success) {
+    process.exit(1);
+  }
+}
+
+module.exports = { run, runSql };
