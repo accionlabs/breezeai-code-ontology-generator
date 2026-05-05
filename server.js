@@ -19,6 +19,17 @@ const { createS3UploadStream } = require("./s3-upload");
 const app = express();
 app.use(express.json({ limit: "50mb" }));
 
+// Capture flags read from env so analyzers emit `sourceCode` on functions and
+// `statements` arrays on files/classes. Truthy values: "1", "true", "yes" (case-insensitive).
+function envFlag(name) {
+  const v = process.env[name];
+  return typeof v === "string" && /^(1|true|yes)$/i.test(v.trim());
+}
+const captureOpts = {
+  captureSourceCode: envFlag("CAPTURE_SOURCE_CODE"),
+  captureStatements: envFlag("CAPTURE_STATEMENTS"),
+};
+
 // --- Helpers ---
 
 function parseRepoUrl(repoUrl) {
@@ -151,7 +162,7 @@ async function runAnalysis(files, projectName, skeletonPaths, { keepTempDir = fa
     let successCount = 0;
 
     for (const language of detectedLanguages) {
-      const result = await processLanguage(language, tempDir);
+      const result = await processLanguage(language, tempDir, false, captureOpts);
       if (result) {
         successCount++;
         const { projectMetaData } = mergeLanguageOutputs([result], tempDir, tempDir, ndjsonFilePath);
@@ -488,7 +499,7 @@ async function runAnalysisDiffStream({ tempDir, filterSet, s3Key, repo }) {
     let successCount = 0;
 
     for (const language of detectedLanguages) {
-      const result = await processLanguage(language, tempDir);
+      const result = await processLanguage(language, tempDir, false, captureOpts);
       if (result) {
         successCount++;
         const { projectMetaData } = mergeLanguageOutputs([result], tempDir, tempDir, passThrough, filterSet);
