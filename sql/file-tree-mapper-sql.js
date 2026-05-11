@@ -20,6 +20,38 @@ const { parseDDL } = require('./extract-ddl');
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
+// Filename segments that indicate SQL dialect, not a database name.
+// Kept in sync with FILENAME_HINTS in ./detect-dialect.js.
+const DIALECT_FILENAME_SEGMENTS = new Set([
+  'pg', 'postgres', 'postgresql',
+  'mysql', 'mariadb',
+  'oracle', 'ora',
+  'mssql', 'tsql', 'sqlserver',
+  'sqlite',
+]);
+
+// Generic stems that don't carry useful db identity on their own.
+const GENERIC_STEMS = new Set(['schema', 'ddl', 'init', 'setup', 'create', 'tables', 'dump']);
+
+/**
+ * Derive a database name from the SQL file path.
+ *
+ * Strategy: take the filename, drop the `.sql` extension, drop any dialect
+ * hint segment (e.g. `inventory.pg.sql` → `inventory`), then use the first
+ * remaining dot-separated segment. If the resulting stem is generic
+ * (`schema.sql`, `ddl.sql`, ...), fall back to the parent directory name.
+ */
+function deriveDbName(filePath) {
+  const base = path.basename(filePath);
+  const stem = base.toLowerCase().endsWith('.sql') ? base.slice(0, -4) : base;
+  const segments = stem.split('.').filter(s => !DIALECT_FILENAME_SEGMENTS.has(s.toLowerCase()));
+  const first = segments[0] || '';
+  if (first && !GENERIC_STEMS.has(first.toLowerCase())) return first;
+  const parent = path.basename(path.dirname(filePath));
+  if (parent && parent !== '.' && parent !== '/') return parent;
+  return first || null;
+}
+
 /**
  * Get all .sql files in the repo, respecting ignore patterns.
  */
@@ -84,11 +116,14 @@ function analyzeSQLRepo(repoPath, opts = {}) {
         continue;
       }
 
+      const dbName = deriveDbName(filePath);
+
       const record = {
         __type: 'ddl',
         path: relPath,
         language: 'sql',
         dialect: parsed.dialect,
+        dbName,
         tables: parsed.tables,
         views: parsed.views,
         procedures: parsed.procedures,

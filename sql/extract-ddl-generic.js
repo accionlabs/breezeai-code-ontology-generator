@@ -67,16 +67,16 @@ function upper(s) {
 }
 
 function tableRef(t) {
-  if (!t) return { owner: null, name: null };
+  if (!t) return { dbName: null, name: null };
   const ref = Array.isArray(t) ? t[0] : t;
   return {
-    owner: ref.db ? upper(ref.db) : null,
+    dbName: ref.db ? upper(ref.db) : null,
     name: upper(ref.table),
   };
 }
 
-function fullName(owner, name) {
-  return owner ? `${owner}.${name}` : name;
+function fullName(dbName, name) {
+  return dbName ? `${dbName}.${name}` : name;
 }
 
 function formatDataType(def) {
@@ -94,7 +94,7 @@ function formatDataType(def) {
 // -----------------------------------------------------------
 
 function extractTable(stmt) {
-  const { owner, name } = tableRef(stmt.table);
+  const { dbName, name } = tableRef(stmt.table);
   if (!name) return null;
 
   const columns = [];
@@ -151,7 +151,7 @@ function extractTable(stmt) {
         if (d.reference_definition) {
           const ref = tableRef(d.reference_definition.table);
           c.refTableName = ref.name;
-          if (ref.owner) c.refTableOwner = ref.owner;
+          if (ref.dbName) c.refTableDbName = ref.dbName;
           c.refColumns = (d.reference_definition.definition || []).map(x => upper(unwrapName(x))).filter(Boolean);
           if (d.reference_definition.on_delete) c.onDelete = upper(d.reference_definition.on_delete);
         }
@@ -175,8 +175,8 @@ function extractTable(stmt) {
 
   return {
     name,
-    owner,
-    fullName: fullName(owner, name),
+    dbName,
+    fullName: fullName(dbName, name),
     tableType: stmt.temporary ? 'temporary' : 'table',
     columnCount: columns.length,
     hasPrimaryKey: columns.some(c => c.isPrimaryKey) || !!pk,
@@ -190,12 +190,12 @@ function extractTable(stmt) {
 // -----------------------------------------------------------
 
 function extractView(stmt) {
-  const { owner, name } = tableRef(stmt.view || stmt.table);
+  const { dbName, name } = tableRef(stmt.view || stmt.table);
   if (!name) return null;
   return {
     name,
-    owner,
-    fullName: fullName(owner, name),
+    dbName,
+    fullName: fullName(dbName, name),
     viewType: 'view',
     definition: null,
     columns: [],
@@ -207,7 +207,7 @@ function extractView(stmt) {
 // -----------------------------------------------------------
 
 function extractIndex(stmt) {
-  const { owner, name: tableName } = tableRef(stmt.table);
+  const { dbName, name: tableName } = tableRef(stmt.table);
   const indexName = upper(stmt.index);
   const cols = (stmt.index_columns || [])
     .map(c => upper(unwrapName(c.column || c)))
@@ -215,7 +215,7 @@ function extractIndex(stmt) {
   return {
     name: indexName,
     tableName,
-    tableFullName: fullName(owner, tableName),
+    tableFullName: fullName(dbName, tableName),
     columns: cols,
     isUnique: /unique/i.test(stmt.index_type || ''),
     indexType: 'BTREE',
@@ -259,7 +259,7 @@ function buildConstraintFromDef(def, tableName) {
     if (def.reference_definition) {
       const ref = tableRef(def.reference_definition.table);
       c.refTableName = ref.name;
-      if (ref.owner) c.refTableOwner = ref.owner;
+      if (ref.dbName) c.refTableDbName = ref.dbName;
       c.refColumns = (def.reference_definition.definition || []).map(x => upper(unwrapName(x))).filter(Boolean);
       const onDel = extractOnAction(def.reference_definition, 'delete');
       const onUpd = extractOnAction(def.reference_definition, 'update');
@@ -353,8 +353,8 @@ function parseGenericDDL(ddlText, dialect) {
           const ref = tableRef(ast.function || ast.procedure || ast.table);
           procedures.push({
             name: ref.name,
-            owner: ref.owner,
-            fullName: fullName(ref.owner, ref.name),
+            dbName: ref.dbName,
+            fullName: fullName(ref.dbName, ref.name),
             procedureType: kw,
             parameters: [],
             returnType: null,
