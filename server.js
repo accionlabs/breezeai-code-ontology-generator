@@ -355,10 +355,9 @@ async function resolveGitDiff({ provider, owner, repo, currentCommitId, incoming
     owner, repo, currentCommitId, incomingCommitId, gitToken,
   });
 
-  if (changed.length === 0) {
+  if (changed.length === 0 && deleted.length === 0) {
     const err = new Error("No changed files found between the two commits");
     err.statusCode = 422;
-    err.deletedFiles = deleted;
     throw err;
   }
 
@@ -639,11 +638,38 @@ app.post("/api/analyze-diff", async (req, res) => {
     }
 
     const llmPlatform = req.query.llmPlatform || "AWSBEDROCK";
+    const hasChangedFiles = !filterSet || filterSet.size > 0;
     const s3Key = `code-ontology/${projectUuid}/${incomingCommitId}.ndjson.gz`;
+    let projectMetaData;
 
-    const { projectMetaData } = await runAnalysisDiffStream({
-      tempDir, filterSet, s3Key, repo,
-    });
+    if (hasChangedFiles) {
+      ({ projectMetaData } = await runAnalysisDiffStream({
+        tempDir, filterSet, s3Key, repo,
+      }));
+    } else {
+      // Deletion-only commit — no files to parse. Upload an empty NDJSON.gz so
+      // the s3Key is valid for Breeze, and send a fully-shaped projectMetaData.
+      if (tempDir) {
+        try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+      }
+      const { passThrough, uploadPromise } = createS3UploadStream(s3Key);
+      passThrough.end();
+      await uploadPromise;
+
+      const repoName = repo || "untitled-project";
+      projectMetaData = {
+        repositoryPath: repoName,
+        repositoryName: repoName,
+        analyzedLanguages: [],
+        totalFiles: 0,
+        totalFunctions: 0,
+        totalClasses: 0,
+        totalLinesOfCode: 0,
+        configs: {},
+        generatedAt: new Date().toISOString(),
+        toolVersion: "1.0.0",
+      };
+    }
 
     projectMetaData.repoUrl = repoUrl;
     projectMetaData.gitBranch = gitBranch;
@@ -672,7 +698,10 @@ app.post("/api/analyze-diff", async (req, res) => {
     res.json({
       success: true,
       s3Key,
-      message: "Code ontology streamed to S3 and notification sent to Breeze API for ingestion.",
+      deletedFiles,
+      message: hasChangedFiles
+        ? "Code ontology streamed to S3 and notification sent to Breeze API for ingestion."
+        : "Deletion-only commit — notification sent to Breeze API with deleted files.",
     });
   } catch (err) {
     console.error("Analyze-diff error:", err);
