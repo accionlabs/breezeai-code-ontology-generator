@@ -41,6 +41,52 @@ function isPlSqlBlockStart(buffer) {
   return false;
 }
 
+/**
+ * Classify a PL/SQL block's wrapper so we know how to balance BEGIN/END counts:
+ *   - 'wrapper-no-begin': PACKAGE / PACKAGE BODY / TYPE BODY — wrapper adds an
+ *     extra END with no matching BEGIN, so termination is `ends === begins + 1`.
+ *   - 'wrapper-with-begin': FUNCTION / PROCEDURE / TRIGGER — wrapper opens with
+ *     BEGIN and closes with END; termination is `begins > 0 && begins === ends`.
+ *   - 'anonymous': bare DECLARE / BEGIN block — same balanced rule as above.
+ */
+function detectPlSqlWrapper(buffer) {
+  const head = buffer.replace(/^(?:\s|--[^\n]*\n|\/\*[\s\S]*?\*\/)+/, '').toUpperCase();
+  if (!head) return null;
+  if (/^DECLARE\b/.test(head) || /^BEGIN\b/.test(head)) return 'anonymous';
+  const m = head.match(/^CREATE\s+(?:OR\s+REPLACE\s+)?(?:EDITIONABLE\s+|NONEDITIONABLE\s+)?(PACKAGE(?:\s+BODY)?|TYPE\s+BODY|PROCEDURE|FUNCTION|TRIGGER)\b/);
+  if (!m) return null;
+  const kind = m[1];
+  if (/^PACKAGE/.test(kind) || /^TYPE\s+BODY/.test(kind)) return 'wrapper-no-begin';
+  return 'wrapper-with-begin';
+}
+
+/**
+ * Count BEGIN/END keyword pairs in a PL/SQL buffer, ignoring strings/comments
+ * and excluding END forms that don't pair with BEGIN (`END IF`, `END LOOP`, …).
+ */
+function countPlSqlBlockKeywords(buffer) {
+  // Strip line + block comments and single-quoted / q-quoted string literals so
+  // a BEGIN inside a comment/string doesn't skew the depth count.
+  let s = buffer
+    .replace(/--[^\n]*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/[qQ]'(\[|<|\(|\{)([\s\S]*?)(\]|>|\)|\})'/g, "''")
+    .replace(/[qQ]'(.)([\s\S]*?)\1'/g, "''")
+    .replace(/'(?:''|[^'])*'/g, "''");
+  const begins = (s.match(/\bBEGIN\b/gi) || []).length;
+  // Block-closing END: not followed by a non-matching END-clause keyword.
+  const ends = (s.match(/\bEND\b(?!\s+(?:IF|LOOP|CASE|WHILE|RECORD|OBJECT|MAP|BLOCK)\b)/gi) || []).length;
+  return { begins, ends };
+}
+
+function isPlSqlBlockTerminated(buffer) {
+  const wrapper = detectPlSqlWrapper(buffer);
+  if (!wrapper) return false;
+  const { begins, ends } = countPlSqlBlockKeywords(buffer);
+  if (wrapper === 'wrapper-no-begin') return ends === begins + 1;
+  return begins > 0 && begins === ends;
+}
+
 function splitStatements(ddlText) {
   const statements = [];
   let current = '';
@@ -120,11 +166,18 @@ function splitStatements(ddlText) {
       if (ch === ';' && depth === 0) {
         // Inside a PL/SQL block (CREATE PROCEDURE / FUNCTION / TRIGGER / PACKAGE
         // or a bare DECLARE/BEGIN block) semicolons are statement terminators
-        // *inside* the block — they don't end the outer DDL. Only the `/`
-        // sentinel on its own line ends the block. Detect by inspecting the
-        // start of `current`.
+        // *inside* the block — they don't end the outer DDL. Two ways to end
+        // such a block: (1) a `/` sentinel on its own line (handled below);
+        // (2) the BEGIN/END keyword counts balance, meaning we just saw the
+        // matching outer END. Many Oracle dumps omit the `/` and rely on (2).
         if (isPlSqlBlockStart(current)) {
+          // Append the `;` first so it's part of the block-end test.
           current += ch;
+          if (isPlSqlBlockTerminated(current)) {
+            const trimmed = current.trim();
+            if (trimmed) statements.push(trimmed);
+            current = '';
+          }
           i++;
           continue;
         }
@@ -507,7 +560,7 @@ function parseColumnDef(def, tableName) {
       refTableName: unquoteIdent(fkM[3]),
       refColumns: fkM[4] ? splitColList(fkM[4]) : [],
     };
-    if (fkM[2]) c.refTableDbName = unquoteIdent(fkM[2]);
+    if (fkM[2]) c.refTableSchema = unquoteIdent(fkM[2]);
     if (fkM[5]) c.onDelete = fkM[5].toUpperCase().replace(/\s+/g, ' ');
     inlineConstraints.push(c);
     col.isForeignKey = true;
@@ -551,6 +604,7 @@ function parseColumnDef(def, tableName) {
       name: ckNameM ? unquoteIdent(ckNameM[1]) : null,
       tableName,
       constraintType: 'CHECK',
+      columns: [],
       checkExpression,
     });
   }
@@ -600,7 +654,7 @@ function parseTableConstraint(def, tableName) {
   if (fkMatch) {
     constraint.constraintType = 'FOREIGN_KEY';
     constraint.columns = splitColList(fkMatch[1]);
-    if (fkMatch[2]) constraint.refTableDbName = unquoteIdent(fkMatch[2]);
+    if (fkMatch[2]) constraint.refTableSchema = unquoteIdent(fkMatch[2]);
     constraint.refTableName = unquoteIdent(fkMatch[3]);
     constraint.refColumns = fkMatch[4] ? splitColList(fkMatch[4]) : [];
     if (fkMatch[5]) constraint.onDelete = fkMatch[5].toUpperCase().replace(/\s+/g, ' ');
@@ -614,6 +668,7 @@ function parseTableConstraint(def, tableName) {
   const checkMatch = def.match(/^CHECK\s*\((.+)\)(?:\s+ENABLE)?(?:\s+DISABLE)?(?:\s+VALIDATE)?(?:\s+NOVALIDATE)?/i);
   if (checkMatch) {
     constraint.constraintType = 'CHECK';
+    constraint.columns = [];
     constraint.checkExpression = checkMatch[1].trim();
     // Oracle-specific options
     const enabledMatch = def.match(/\b(ENABLE|DISABLE)\b/i);
@@ -642,9 +697,9 @@ function parseCreateTable(stmt) {
   const headerMatch = stmt.match(headerRe);
   if (!headerMatch) return null;
 
-  const dbName = headerMatch[1] ? unquoteIdent(headerMatch[1]) : null;
+  const schema = headerMatch[1] ? unquoteIdent(headerMatch[1]) : null;
   const name = unquoteIdent(headerMatch[2]);
-  const fullName = dbName ? `${dbName}.${name}` : name;
+  const fullName = schema ? `${schema}.${name}` : name;
 
   // Extract the table body (outermost parens)
   const bodyStart = stmt.indexOf('(');
@@ -698,7 +753,7 @@ function parseCreateTable(stmt) {
 
   return {
     name,
-    dbName,
+    schema: schema,
     fullName,
     tableType,
     columnCount: columns.length,
@@ -725,9 +780,9 @@ function parseCreateView(stmt) {
   const m = stmt.match(viewRe);
   if (!m) return null;
 
-  const dbName = m[1] ? unquoteIdent(m[1]) : null;
+  const schema = m[1] ? unquoteIdent(m[1]) : null;
   const name = unquoteIdent(m[2]);
-  const fullName = dbName ? `${dbName}.${name}` : name;
+  const fullName = schema ? `${schema}.${name}` : name;
   // m[3] holds optional column list and any storage/refresh clauses; pull out a column list if present
   const colListMatch = (m[3] || '').match(/^\s*\(([^)]*)\)/);
   const columnList = colListMatch ? splitColList(colListMatch[1]) : [];
@@ -736,7 +791,7 @@ function parseCreateView(stmt) {
 
   return {
     name,
-    dbName,
+    schema: schema,
     fullName,
     viewType: isMatView ? 'materialized_view' : 'view',
     definition,
@@ -758,9 +813,9 @@ function parseCreateProcedure(stmt) {
   if (!m) return null;
 
   const procType = m[1].toUpperCase().replace(/\s+/, '_');
-  const dbName = m[2] ? unquoteIdent(m[2]) : null;
+  const schema = m[2] ? unquoteIdent(m[2]) : null;
   const name = unquoteIdent(m[3]);
-  const fullName = dbName ? `${dbName}.${name}` : name;
+  const fullName = schema ? `${schema}.${name}` : name;
   const rest = m[4] || '';
 
   // Extract parameters if present (skip for triggers — they don't take params)
@@ -822,7 +877,7 @@ function parseCreateProcedure(stmt) {
 
     const onMatch = header.match(new RegExp('\\bON\\s+(?:(' + IDENT_RE_SRC + ')\\.)?(' + IDENT_RE_SRC + ')', 'i'));
     if (onMatch) {
-      if (onMatch[1]) triggerInfo.targetDbName = unquoteIdent(onMatch[1]);
+      if (onMatch[1]) triggerInfo.targetSchema = unquoteIdent(onMatch[1]);
       triggerInfo.targetTable = unquoteIdent(onMatch[2]);
     }
     if (/\bFOR\s+EACH\s+ROW\b/i.test(header)) triggerInfo.level = 'ROW';
@@ -838,7 +893,7 @@ function parseCreateProcedure(stmt) {
 
   const out = {
     name,
-    dbName,
+    schema: schema,
     fullName,
     procedureType: typeLower,
     parameters,
@@ -864,9 +919,9 @@ function parseCreateIndex(stmt) {
 
   const indexModifier = m[1] ? m[1].trim().toUpperCase() : null;
   const indexName = unquoteIdent(m[3]);
-  const tableDbName = m[4] ? unquoteIdent(m[4]) : null;
+  const tableSchema = m[4] ? unquoteIdent(m[4]) : null;
   const tableName = unquoteIdent(m[5]);
-  const tableFullName = tableDbName ? `${tableDbName}.${tableName}` : tableName;
+  const tableFullName = tableSchema ? `${tableSchema}.${tableName}` : tableName;
   const colStr = m[6];
   const options = m[7] || '';
 
@@ -913,7 +968,7 @@ function parseCreateSequence(stmt) {
   const m = stmt.match(re);
   if (!m) return null;
 
-  const dbName = m[1] ? unquoteIdent(m[1]) : null;
+  const schema = m[1] ? unquoteIdent(m[1]) : null;
   const name = unquoteIdent(m[2]);
   const options = m[3] || '';
 
@@ -924,8 +979,8 @@ function parseCreateSequence(stmt) {
 
   const seq = {
     name,
-    dbName,
-    fullName: dbName ? `${dbName}.${name}` : name,
+    schema,
+    fullName: schema ? `${schema}.${name}` : name,
     startWith: readNum(/\bSTART\s+WITH\s+(-?\d+)/i),
     incrementBy: readNum(/\bINCREMENT\s+BY\s+(-?\d+)/i),
     minValue: /\bNOMINVALUE\b/i.test(options) ? null : readNum(/\bMINVALUE\s+(-?\d+)/i),
@@ -951,7 +1006,7 @@ function parseComment(stmt) {
   if (tableMatch) {
     return {
       target: 'table',
-      dbName: tableMatch[1] ? unquoteIdent(tableMatch[1]) : null,
+      schema: tableMatch[1] ? unquoteIdent(tableMatch[1]) : null,
       name: unquoteIdent(tableMatch[2]),
       comment: tableMatch[3].replace(/''/g, "'"),
     };
@@ -966,7 +1021,7 @@ function parseComment(stmt) {
   if (colMatch) {
     return {
       target: 'column',
-      dbName: colMatch[1] ? unquoteIdent(colMatch[1]) : null,
+      schema: colMatch[1] ? unquoteIdent(colMatch[1]) : null,
       tableName: unquoteIdent(colMatch[2]),
       columnName: unquoteIdent(colMatch[3]),
       comment: colMatch[4].replace(/''/g, "'"),
@@ -988,14 +1043,14 @@ function parseAlterTableConstraint(stmt) {
   const m = stmt.match(re);
   if (!m) return null;
 
-  const dbName = m[1] ? unquoteIdent(m[1]) : null;
+  const schema = m[1] ? unquoteIdent(m[1]) : null;
   const tableName = unquoteIdent(m[2]);
   const addClause = m[3].trim();
 
   const constraint = parseTableConstraint(addClause, tableName);
   if (!constraint) return null;
 
-  return { tableName, dbName, constraint };
+  return { tableName, schema, constraint };
 }
 
 /**
@@ -1010,7 +1065,7 @@ function parseAlterTableDropConstraint(stmt) {
   const m = stmt.match(re);
   if (!m) return null;
   return {
-    dbName: m[1] ? unquoteIdent(m[1]) : null,
+    schema: m[1] ? unquoteIdent(m[1]) : null,
     tableName: unquoteIdent(m[2]),
     constraintName: unquoteIdent(m[3]),
   };
@@ -1024,7 +1079,7 @@ function parseAlterTableDropConstraint(stmt) {
  * Parse `ALTER TABLE [schema.]name ADD (<col_def>, ...)` or
  *        `ALTER TABLE [schema.]name ADD <col_def>` (single column, no parens).
  *
- * Returns { dbName, tableName, columns[], inlineConstraints[] } or null.
+ * Returns { schema, tableName, columns[], inlineConstraints[] } or null.
  */
 function parseAlterTableAddColumn(stmt) {
   const re = new RegExp(
@@ -1034,7 +1089,7 @@ function parseAlterTableAddColumn(stmt) {
   const m = stmt.match(re);
   if (!m) return null;
 
-  const dbName = m[1] ? unquoteIdent(m[1]) : null;
+  const schema = m[1] ? unquoteIdent(m[1]) : null;
   const tableName = unquoteIdent(m[2]);
   let addBody = m[3].trim();
 
@@ -1067,7 +1122,7 @@ function parseAlterTableAddColumn(stmt) {
   }
 
   if (columns.length === 0 && inlineConstraints.length === 0) return null;
-  return { dbName, tableName, columns, inlineConstraints };
+  return { schema, tableName, columns, inlineConstraints };
 }
 
 // -----------------------------------------------------------
@@ -1078,7 +1133,7 @@ function parseAlterTableAddColumn(stmt) {
  * Parse `ALTER TABLE [schema.]name MODIFY (<col_def>, ...)` or
  *        `ALTER TABLE [schema.]name MODIFY <col_def>`.
  *
- * Returns { dbName, tableName, modifications[] } where each modification is a
+ * Returns { schema, tableName, modifications[] } where each modification is a
  * partial column object (name + whichever properties the MODIFY changes).
  */
 function parseAlterTableModifyColumn(stmt) {
@@ -1089,7 +1144,7 @@ function parseAlterTableModifyColumn(stmt) {
   const m = stmt.match(re);
   if (!m) return null;
 
-  const dbName = m[1] ? unquoteIdent(m[1]) : null;
+  const schema = m[1] ? unquoteIdent(m[1]) : null;
   const tableName = unquoteIdent(m[2]);
   let modBody = m[3].trim();
 
@@ -1108,7 +1163,7 @@ function parseAlterTableModifyColumn(stmt) {
   }
 
   if (modifications.length === 0) return null;
-  return { dbName, tableName, modifications };
+  return { schema, tableName, modifications };
 }
 
 // -----------------------------------------------------------
@@ -1127,7 +1182,7 @@ function parseAlterTableDropColumn(stmt) {
   const m1 = stmt.match(re1);
   if (m1) {
     return {
-      dbName: m1[1] ? unquoteIdent(m1[1]) : null,
+      schema: m1[1] ? unquoteIdent(m1[1]) : null,
       tableName: unquoteIdent(m1[2]),
       columns: [unquoteIdent(m1[3])],
     };
@@ -1141,7 +1196,7 @@ function parseAlterTableDropColumn(stmt) {
   const m2 = stmt.match(re2);
   if (m2) {
     return {
-      dbName: m2[1] ? unquoteIdent(m2[1]) : null,
+      schema: m2[1] ? unquoteIdent(m2[1]) : null,
       tableName: unquoteIdent(m2[2]),
       columns: splitColList(m2[3]),
     };
@@ -1161,7 +1216,7 @@ function parseAlterTableRenameColumn(stmt) {
   const m = stmt.match(re);
   if (!m) return null;
   return {
-    dbName: m[1] ? unquoteIdent(m[1]) : null,
+    schema: m[1] ? unquoteIdent(m[1]) : null,
     tableName: unquoteIdent(m[2]),
     oldName: unquoteIdent(m[3]),
     newName: unquoteIdent(m[4]),
@@ -1237,7 +1292,7 @@ function parseOracleDDL(ddlText) {
       if (t) {
         tables.push(t);
         tableMap[t.name] = t;
-        if (t.dbName) tableMap[t.fullName] = t;
+        if (t.schema) tableMap[t.fullName] = t;
         parseReport.parsed++;
         parseReport.byKind.table++;
       } else {
@@ -1284,7 +1339,7 @@ function parseOracleDDL(ddlText) {
       if (c) {
         if (c.target === 'table') {
           commentMap.tables[c.name] = c.comment;
-          if (c.dbName) commentMap.tables[`${c.dbName}.${c.name}`] = c.comment;
+          if (c.schema) commentMap.tables[`${c.schema}.${c.name}`] = c.comment;
         } else if (c.target === 'column') {
           const key = `${c.tableName}.${c.columnName}`;
           commentMap.columns[key] = c.comment;
@@ -1298,9 +1353,9 @@ function parseOracleDDL(ddlText) {
       // Snapshot semantics: apply all ALTER TABLE mutations in file order so
       // re-parsing the same file always yields the same final state.
 
-      // Helper to look up a table by name (with optional dbName prefix)
-      function findTable(name, dbName) {
-        return tableMap[name] || (dbName && tableMap[`${dbName}.${name}`]) || null;
+      // Helper to look up a table by name (with optional schema prefix)
+      function findTable(name, schema) {
+        return tableMap[name] || (schema && tableMap[`${schema}.${name}`]) || null;
       }
 
       // Helper to recompute column PK/FK flags from constraints
@@ -1330,7 +1385,7 @@ function parseOracleDDL(ddlText) {
       // --- DROP CONSTRAINT ---
       const dropCon = parseAlterTableDropConstraint(stripped);
       if (dropCon) {
-        const tbl = findTable(dropCon.tableName, dropCon.dbName);
+        const tbl = findTable(dropCon.tableName, dropCon.schema);
         if (tbl) {
           tbl.constraints = tbl.constraints.filter(c => c.name !== dropCon.constraintName);
           recomputeColumnFlags(tbl);
@@ -1344,7 +1399,7 @@ function parseOracleDDL(ddlText) {
       if (!handled) {
         const dropCol = parseAlterTableDropColumn(stripped);
         if (dropCol) {
-          const tbl = findTable(dropCol.tableName, dropCol.dbName);
+          const tbl = findTable(dropCol.tableName, dropCol.schema);
           if (tbl) {
             tbl.columns = tbl.columns.filter(c => !dropCol.columns.includes(c.name));
             // Remove constraints that reference dropped columns
@@ -1367,7 +1422,7 @@ function parseOracleDDL(ddlText) {
       if (!handled) {
         const renamCol = parseAlterTableRenameColumn(stripped);
         if (renamCol) {
-          const tbl = findTable(renamCol.tableName, renamCol.dbName);
+          const tbl = findTable(renamCol.tableName, renamCol.schema);
           if (tbl) {
             const col = tbl.columns.find(c => c.name === renamCol.oldName);
             if (col) col.name = renamCol.newName;
@@ -1394,7 +1449,7 @@ function parseOracleDDL(ddlText) {
       if (!handled) {
         const addCol = parseAlterTableAddColumn(stripped);
         if (addCol) {
-          const tbl = findTable(addCol.tableName, addCol.dbName);
+          const tbl = findTable(addCol.tableName, addCol.schema);
           if (tbl) {
             for (const newCol of addCol.columns) {
               // Avoid duplicates (idempotent re-apply)
@@ -1419,7 +1474,7 @@ function parseOracleDDL(ddlText) {
       if (!handled) {
         const modCol = parseAlterTableModifyColumn(stripped);
         if (modCol) {
-          const tbl = findTable(modCol.tableName, modCol.dbName);
+          const tbl = findTable(modCol.tableName, modCol.schema);
           if (tbl) {
             for (const mod of modCol.modifications) {
               const existing = tbl.columns.find(c => c.name === mod.name);
@@ -1457,7 +1512,7 @@ function parseOracleDDL(ddlText) {
       if (!handled) {
         const alt = parseAlterTableConstraint(stripped);
         if (alt) {
-          const tbl = findTable(alt.tableName, alt.dbName);
+          const tbl = findTable(alt.tableName, alt.schema);
           if (tbl) {
             const dup = tbl.constraints.some(c => constraintsEquivalent(c, alt.constraint));
             if (!dup) {

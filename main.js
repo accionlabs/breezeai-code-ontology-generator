@@ -28,7 +28,6 @@ const { analyzePHPRepo } = require("./php/file-tree-mapper-php");
 const { analyzeVBNetRepo } = require("./vbnet/file-tree-mapper-vbnet");
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
 const { analyzeVueRepo } = require("./vue/file-tree-mapper-vue");
-const { analyzeSQLRepo } = require("./sql/file-tree-mapper-sql");
 const { analyzePerlRepo } = require("./perl/file-tree-mapper-perl");
 const {
   getIgnorePatterns,
@@ -106,11 +105,6 @@ const LANGUAGE_CONFIG = {
     name: "Vue",
     analyzer: analyzeVueRepo,
     priority: 2, // Check before plain JavaScript so .vue files are detected
-  },
-  sql: {
-    extensions: ["**/*.sql"],
-    name: "SQL/DDL",
-    analyzer: analyzeSQLRepo,
   },
   perl: {
     extensions: ["**/*.pl", "**/*.pm", "**/*.psgi", "**/*.t"],
@@ -815,20 +809,15 @@ async function autoDetectAndProcess(repoPath, outputDir, opts) {
       try {
         console.log(`\n🚀 Processing ${language.name}...`);
 
-        // Streaming callback: each file result is written to NDJSON immediately
+        // Streaming callback: each file result is written to NDJSON immediately.
         const onResult = (fileData) => {
-          // DDL records (__type: "ddl") keep their own type; code records get type = "code"
-          if (fileData.__type !== 'ddl') {
-            const filePath = path.join(repoPath, fileData.path);
-            const loc = countLinesOfCode(filePath);
-            totalLinesOfCode += loc;
+          const filePath = path.join(repoPath, fileData.path);
+          const loc = countLinesOfCode(filePath);
+          totalLinesOfCode += loc;
 
-            fileData.type = "code";
-            fileData.language = language.key;
-            fileData.loc = loc;
-          } else {
-            fileData.language = language.key;
-          }
+          fileData.type = "code";
+          fileData.language = language.key;
+          fileData.loc = loc;
 
           fs.writeSync(ndjsonFd, JSON.stringify(fileData) + "\n");
           totalFiles++;

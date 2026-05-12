@@ -33,6 +33,7 @@
     "express": "^5.2.1",
     "glob": "^11.0.3",
     "minimist": "^1.2.8",
+    "multer": "^2.1.1",
     "node-sql-parser": "^5.4.0",
     "tree-sitter": "^0.25.0",
     "tree-sitter-c-sharp": "^0.23.1",

@@ -67,16 +67,18 @@ function upper(s) {
 }
 
 function tableRef(t) {
-  if (!t) return { dbName: null, name: null };
+  if (!t) return { schema: null, name: null };
   const ref = Array.isArray(t) ? t[0] : t;
+  // View-shaped AST nodes from node-sql-parser carry the name on `view`
+  // instead of `table` (e.g. CREATE VIEW emits `{ db, view: 'name' }`).
   return {
-    dbName: ref.db ? upper(ref.db) : null,
-    name: upper(ref.table),
+    schema: ref.db ? upper(ref.db) : null,
+    name: upper(ref.table || ref.view),
   };
 }
 
-function fullName(dbName, name) {
-  return dbName ? `${dbName}.${name}` : name;
+function fullName(schema, name) {
+  return schema ? `${schema}.${name}` : name;
 }
 
 function formatDataType(def) {
@@ -94,7 +96,7 @@ function formatDataType(def) {
 // -----------------------------------------------------------
 
 function extractTable(stmt) {
-  const { dbName, name } = tableRef(stmt.table);
+  const { schema, name } = tableRef(stmt.table);
   if (!name) return null;
 
   const columns = [];
@@ -151,13 +153,14 @@ function extractTable(stmt) {
         if (d.reference_definition) {
           const ref = tableRef(d.reference_definition.table);
           c.refTableName = ref.name;
-          if (ref.dbName) c.refTableDbName = ref.dbName;
+          if (ref.schema) c.refTableSchema = ref.schema;
           c.refColumns = (d.reference_definition.definition || []).map(x => upper(unwrapName(x))).filter(Boolean);
           if (d.reference_definition.on_delete) c.onDelete = upper(d.reference_definition.on_delete);
         }
         constraints.push(c);
       } else if (ctype === 'check') {
         c.constraintType = 'CHECK';
+        c.columns = [];
         c.checkExpression = JSON.stringify(d.definition || d.expr || null);
         constraints.push(c);
       }
@@ -175,8 +178,8 @@ function extractTable(stmt) {
 
   return {
     name,
-    dbName,
-    fullName: fullName(dbName, name),
+    schema,
+    fullName: fullName(schema, name),
     tableType: stmt.temporary ? 'temporary' : 'table',
     columnCount: columns.length,
     hasPrimaryKey: columns.some(c => c.isPrimaryKey) || !!pk,
@@ -190,14 +193,23 @@ function extractTable(stmt) {
 // -----------------------------------------------------------
 
 function extractView(stmt) {
-  const { dbName, name } = tableRef(stmt.view || stmt.table);
+  const { schema, name } = tableRef(stmt.view || stmt.table);
   if (!name) return null;
+  let definition = null;
+  if (stmt.select) {
+    try {
+      const sql = parser.sqlify(stmt.select);
+      if (sql) definition = String(sql).slice(0, 1000);
+    } catch {
+      // sqlify can fail on unusual selects; fall back to no body
+    }
+  }
   return {
     name,
-    dbName,
-    fullName: fullName(dbName, name),
+    schema,
+    fullName: fullName(schema, name),
     viewType: 'view',
-    definition: null,
+    definition,
     columns: [],
   };
 }
@@ -207,7 +219,7 @@ function extractView(stmt) {
 // -----------------------------------------------------------
 
 function extractIndex(stmt) {
-  const { dbName, name: tableName } = tableRef(stmt.table);
+  const { schema, name: tableName } = tableRef(stmt.table);
   const indexName = upper(stmt.index);
   const cols = (stmt.index_columns || [])
     .map(c => upper(unwrapName(c.column || c)))
@@ -215,7 +227,7 @@ function extractIndex(stmt) {
   return {
     name: indexName,
     tableName,
-    tableFullName: fullName(dbName, tableName),
+    tableFullName: fullName(schema, tableName),
     columns: cols,
     isUnique: /unique/i.test(stmt.index_type || ''),
     indexType: 'BTREE',
@@ -259,7 +271,7 @@ function buildConstraintFromDef(def, tableName) {
     if (def.reference_definition) {
       const ref = tableRef(def.reference_definition.table);
       c.refTableName = ref.name;
-      if (ref.dbName) c.refTableDbName = ref.dbName;
+      if (ref.schema) c.refTableSchema = ref.schema;
       c.refColumns = (def.reference_definition.definition || []).map(x => upper(unwrapName(x))).filter(Boolean);
       const onDel = extractOnAction(def.reference_definition, 'delete');
       const onUpd = extractOnAction(def.reference_definition, 'update');
@@ -270,6 +282,7 @@ function buildConstraintFromDef(def, tableName) {
   }
   if (ctype === 'check') {
     c.constraintType = 'CHECK';
+    c.columns = [];
     c.checkExpression = JSON.stringify(def.definition || def.expr || null);
     return c;
   }
@@ -353,8 +366,8 @@ function parseGenericDDL(ddlText, dialect) {
           const ref = tableRef(ast.function || ast.procedure || ast.table);
           procedures.push({
             name: ref.name,
-            dbName: ref.dbName,
-            fullName: fullName(ref.dbName, ref.name),
+            schema: ref.schema,
+            fullName: fullName(ref.schema, ref.name),
             procedureType: kw,
             parameters: [],
             returnType: null,
