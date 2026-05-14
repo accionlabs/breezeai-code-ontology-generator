@@ -462,6 +462,11 @@ function parseColumnDef(def, tableName) {
   // Skip table-level constraints (they start with CONSTRAINT, PRIMARY, UNIQUE, FOREIGN, CHECK)
   if (/^(CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY|CHECK)\b/i.test(def)) return null;
 
+  // Skip Oracle in-body clauses that look syntactically like a column line but aren't.
+  // SUPPLEMENTAL LOG DATA (...) COLUMNS / SUPPLEMENTAL LOG GROUP name (...) [ALWAYS]
+  // PERIOD FOR period_name (start_col, end_col)
+  if (/^(SUPPLEMENTAL\s+LOG\b|PERIOD\s+FOR\b)/i.test(def)) return null;
+
   // Column: name type [options...]   (name may be a quoted identifier)
   const nameRe = new RegExp('^(' + IDENT_RE_SRC + ')\\s+([\\s\\S]+)');
   const nameMatch = def.match(nameRe);
@@ -1097,6 +1102,10 @@ function parseAlterTableAddColumn(stmt) {
   // that's handled by parseAlterTableConstraint — bail out here.
   if (/^(CONSTRAINT\b|PRIMARY\s+KEY\b|UNIQUE\b|FOREIGN\s+KEY\b|CHECK\b)/i.test(addBody)) return null;
 
+  // Oracle's `ALTER TABLE ... ADD SUPPLEMENTAL LOG DATA ...` / `ADD PERIOD FOR ...`
+  // are physical-storage clauses, not columns or constraints. Skip.
+  if (/^(SUPPLEMENTAL\s+LOG\b|PERIOD\s+FOR\b)/i.test(addBody)) return null;
+
   // Unwrap optional outer parens: ADD (col1 NUMBER, col2 VARCHAR2(20))
   if (addBody.startsWith('(')) {
     const end = findMatchingParen(addBody, 0);
@@ -1108,12 +1117,15 @@ function parseAlterTableAddColumn(stmt) {
   const inlineConstraints = [];
 
   for (const def of defs) {
+    const trimmed = def.trim();
     // Skip table-level constraints that snuck in
-    if (/^(CONSTRAINT\b|PRIMARY\s+KEY\b|UNIQUE\b|FOREIGN\s+KEY\b|CHECK\b)/i.test(def.trim())) {
+    if (/^(CONSTRAINT\b|PRIMARY\s+KEY\b|UNIQUE\b|FOREIGN\s+KEY\b|CHECK\b)/i.test(trimmed)) {
       const con = parseTableConstraint(def, tableName);
       if (con) inlineConstraints.push(con);
       continue;
     }
+    // Skip Oracle physical-storage clauses that aren't columns.
+    if (/^(SUPPLEMENTAL\s+LOG\b|PERIOD\s+FOR\b)/i.test(trimmed)) continue;
     const result = parseColumnDef(def, tableName);
     if (result) {
       columns.push(result.column);
