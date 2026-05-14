@@ -140,11 +140,12 @@ function uploadToGenerate(filePath, apiKey, projectUuid, baseurl, opts) {
     const parts = [];
 
     // file field
+    const fileContentType = fileName.endsWith(".gz") ? "application/gzip" : "application/json";
     parts.push(
       Buffer.from(
         `--${boundary}\r\n` +
         `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
-        `Content-Type: application/json\r\n\r\n`
+        `Content-Type: ${fileContentType}\r\n\r\n`
       )
     );
     parts.push(fileContent);
