@@ -1,4 +1,5 @@
 const express = require("express");
+const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -12,9 +13,17 @@ const {
 } = require("./main");
 const { generateDescriptionsAsync, addMetadataAsync } = require("./llm-enrichment");
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
+const { parseDDL } = require("./sql/extract-ddl");
 const { BREEZE_API_URL } = require("./app-config");
 const callHttp = require("./call-http");
 const { createS3UploadStream } = require("./s3-upload");
+
+// Multipart handler for single-file SQL uploads. Keeps the file in memory
+// (capped) so we can hand it straight to the DDL parser without temp files.
+const sqlUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 },
+});
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -709,6 +718,135 @@ app.post("/api/analyze-diff", async (req, res) => {
     const body = { error: err.message };
     if (err.deletedFiles) body.deletedFiles = err.deletedFiles;
     res.status(status).json(body);
+  }
+});
+
+// Single-file SQL analyzer: parse one .sql, stream NDJSON.gz to S3, then
+// notify the backend to ingest it into the DDL graph. Mirrors /api/analyze-diff.
+app.post("/api/analyze-sql", sqlUpload.single("file"), async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const { projectUuid, dataLakeId, repositoryName } = req.body || {};
+    const llmPlatform = req.query.llmPlatform || req.body?.llmPlatform || "AWSBEDROCK";
+
+    console.log(
+      `🌐 [analyze-sql] ← request: projectUuid=${projectUuid || "<missing>"}, ` +
+      `dataLakeId=${dataLakeId || "<missing>"}, ` +
+      `repositoryName=${repositoryName || "<none>"}, llmPlatform=${llmPlatform}, ` +
+      `file=${req.file?.originalname || "<none>"} (${req.file?.size ?? 0} bytes, ` +
+      `mime=${req.file?.mimetype || "<unknown>"})`,
+    );
+
+    if (!req.file) {
+      console.warn("🌐 [analyze-sql] ✗ rejecting: no file in request");
+      return res.status(400).json({ error: "Multipart 'file' field is required" });
+    }
+    if (!projectUuid) {
+      console.warn("🌐 [analyze-sql] ✗ rejecting: projectUuid missing");
+      return res.status(400).json({ error: "projectUuid is required" });
+    }
+    if (!dataLakeId) {
+      console.warn("🌐 [analyze-sql] ✗ rejecting: dataLakeId missing");
+      return res.status(400).json({ error: "dataLakeId is required" });
+    }
+
+    const fileName = req.file.originalname || "uploaded.sql";
+    const ddlText = req.file.buffer.toString("utf-8");
+
+    console.log(`🌐 [analyze-sql] parsing ${fileName} (${ddlText.length} chars)…`);
+    const parseStart = Date.now();
+    const parsed = parseDDL(ddlText, { filePath: fileName });
+    const sequences = parsed.sequences || [];
+    console.log(
+      `🌐 [analyze-sql] parse done in ${Date.now() - parseStart}ms — ` +
+      `dialect=${parsed.dialect}, tables=${parsed.tables.length}, views=${parsed.views.length}, ` +
+      `procedures=${parsed.procedures.length}, indexes=${parsed.allIndexes.length}, sequences=${sequences.length}` +
+      (parsed.parseReport
+        ? ` | parseReport: ${parsed.parseReport.parsed}/${parsed.parseReport.totalStatements} parsed, ${parsed.parseReport.skipped} skipped`
+        : "") +
+      (parsed.parseStats
+        ? ` | parseStats: ${parsed.parseStats.ok} ok, ${parsed.parseStats.failed} failed`
+        : ""),
+    );
+
+    if (
+      parsed.tables.length === 0 &&
+      parsed.views.length === 0 &&
+      parsed.procedures.length === 0 &&
+      parsed.allIndexes.length === 0 &&
+      sequences.length === 0
+    ) {
+      console.warn(`🌐 [analyze-sql] ✗ no DDL objects extracted from ${fileName} (dialect=${parsed.dialect})`);
+      return res.status(422).json({
+        error: "No DDL objects could be extracted from the SQL file",
+        dialect: parsed.dialect,
+        parseReport: parsed.parseReport,
+      });
+    }
+
+    const record = {
+      __type: "ddl",
+      path: fileName,
+      language: "sql",
+      dialect: parsed.dialect,
+      tables: parsed.tables,
+      views: parsed.views,
+      procedures: parsed.procedures,
+      indexes: parsed.allIndexes,
+      sequences,
+    };
+    if (parsed.parseReport) record.parseReport = parsed.parseReport;
+
+    const safeName = fileName.replace(/[^a-zA-Z0-9_.-]+/g, "_");
+    const s3Key = `db-ontology/${projectUuid}/${dataLakeId}/${Date.now()}-${safeName}.ndjson.gz`;
+
+    console.log(`🌐 [analyze-sql] streaming NDJSON.gz → s3://${s3Key}`);
+    const uploadStart = Date.now();
+    const { passThrough, uploadPromise } = createS3UploadStream(s3Key);
+    const ndjsonLine = JSON.stringify(record) + "\n";
+    passThrough.write(ndjsonLine);
+    passThrough.end();
+    await uploadPromise;
+    console.log(
+      `🌐 [analyze-sql] ✓ S3 upload complete in ${Date.now() - uploadStart}ms ` +
+      `(payload ${ndjsonLine.length} bytes pre-gzip)`,
+    );
+
+    // Fire-and-forget: tell the backend to ingest.
+    const notifyUrl = `${BREEZE_API_URL}/db-ontology/stream-ingest-s3${llmPlatform ? `?llmPlatform=${encodeURIComponent(llmPlatform)}` : ""}`;
+    console.log(`🌐 [analyze-sql] → POST ${notifyUrl}`);
+    const notifyStart = Date.now();
+    callHttp.httpPost(notifyUrl, {
+      s3Key,
+      projectUuid,
+      dataLakeId,
+      repositoryName: repositoryName || fileName,
+    }).then((body) => {
+      console.log(
+        `🌐 [analyze-sql] ✓ stream-ingest-s3 acknowledged in ${Date.now() - notifyStart}ms` +
+        (body ? ` — response: ${JSON.stringify(body).slice(0, 200)}` : ""),
+      );
+    }).catch((err) => {
+      console.error(`🌐 [analyze-sql] ✗ stream-ingest-s3 notification failed: ${err.message}`);
+    });
+
+    console.log(`🌐 [analyze-sql] ✓ request handled in ${Date.now() - t0}ms (file=${fileName})`);
+    res.status(202).json({
+      success: true,
+      s3Key,
+      fileName,
+      dialect: parsed.dialect,
+      tableCount: parsed.tables.length,
+      viewCount: parsed.views.length,
+      procedureCount: parsed.procedures.length,
+      indexCount: parsed.allIndexes.length,
+      sequenceCount: sequences.length,
+      message: "SQL parsed, NDJSON.gz streamed to S3, ingestion notification sent.",
+    });
+  } catch (err) {
+    console.error(`🌐 [analyze-sql] ✗ error after ${Date.now() - t0}ms:`, err);
+    const status = err.statusCode || 500;
+    res.status(status).json({ error: err.message });
   }
 });
 
