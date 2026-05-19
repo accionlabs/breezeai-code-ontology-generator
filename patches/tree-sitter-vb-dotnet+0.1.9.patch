@@ -1,0 +1,118 @@
+diff --git a/node_modules/tree-sitter-vb-dotnet/bindings/node/index.js b/node_modules/tree-sitter-vb-dotnet/bindings/node/index.js
+index 8592454..1111111 100644
+--- a/node_modules/tree-sitter-vb-dotnet/bindings/node/index.js
++++ b/node_modules/tree-sitter-vb-dotnet/bindings/node/index.js
+@@ -1,78 +1,41 @@
++// ---------------------------------------------------------------------------
++// PATCHED by breezeai-code-ontology-generator via patch-package.
++// See patches/tree-sitter-vb-dotnet+0.1.9.patch in the repo root.
++//
++// Why this patch exists:
++//   The shipped tree-sitter-vb-dotnet@0.1.9 wrapper was written against
++//   tree-sitter@0.22.x. It (a) require()s a runtime binding path
++//   `tree-sitter/prebuilds/<plat>-<arch>/tree-sitter.node` that no longer
++//   exists in tree-sitter@0.25.x, and (b) exports `binding.language` (an
++//   N-API External) directly. In Node v22+ (confirmed on v24), properties
++//   set on that External (e.g. `nodeSubclasses`) silently don't persist, so
++//   tree-sitter's own initializeLanguageNodeClasses() can't attach state and
++//   parsing crashes with `TypeError: Cannot read properties of undefined
++//   (reading '<id>')`.
++//
++//   This minimal wrapper mirrors what every other tree-sitter language
++//   binding does (e.g. tree-sitter-python): export the full node-gyp-build
++//   result (a plain JS object `{ language, name }`) and attach nodeTypeInfo.
++//   tree-sitter@0.25.x's setLanguage() then handles nodeSubclasses on its
++//   own, and the plain JS object accepts property assignments normally.
++//
++// Why we patch instead of upgrading:
++//   - 0.1.9 is the latest published version (no newer release for ~9 months).
++//   - The upstream repo (CodeAnt-AI/tree-sitter-vb-dotnet) is effectively
++//     dormant — last commit ~10 months ago, and main branch is in a worse
++//     state than 0.1.9 (the correct wrapper is present but commented out).
++//   - VB.NET has no official tree-sitter grammar under the tree-sitter org;
++//     this package is the only VB.NET grammar on npm, so there's nothing to
++//     switch to.
++// ---------------------------------------------------------------------------
++
+ const root = require("path").join(__dirname, "..", "..");
+
+-let binding;
+-try {
+-  binding = typeof process.versions.bun === "string"
++module.exports =
++  typeof process.versions.bun === "string"
+     ? require(`../../prebuilds/${process.platform}-${process.arch}/tree-sitter-vb-dotnet.node`)
+     : require("node-gyp-build")(root);
+-} catch (error) {
+-  // Fallback to direct binding
+-  binding = require("../../build/Release/tree_sitter_vb_dotnet_binding.node");
+-}
+-
+-if (!binding.language) {
+-  throw new Error("Language not found in binding");
+-}
+-
+-// We need to export the raw language for tree-sitter to accept it,
+-// but then monkey-patch the properties after it's been accepted
+-const language = binding.language;
+-
+-// Add basic properties
+-try {
+-  language.name = "vb_dotnet";
+-  language.nodeTypeInfo = require("../../src/node-types.json");
+-} catch (_) {
+-  console.error("Warning: Could not load node-types.json");
+-}
+-
+-// We need to patch tree-sitter's internals to provide the nodeSubclasses
+-// Since we can't modify the N-API External object, we'll patch the Tree prototype
+-const Parser = require('tree-sitter');
+-const TreeSitterModule = require('tree-sitter');
+-
+-// Get required components
+-let runtimeBinding, nodeTypeNamesById, nodeFieldNamesById, nodeSubclasses;
+
+ try {
+-  // For tree-sitter 0.22.1, the binding is in prebuilds
+-  runtimeBinding = require(`tree-sitter/prebuilds/${process.platform}-${process.arch}/tree-sitter.node`);
+-
+-  nodeTypeNamesById = runtimeBinding.getNodeTypeNamesById(language);
+-  nodeFieldNamesById = runtimeBinding.getNodeFieldNamesById(language);
+-  const {SyntaxNode} = TreeSitterModule;
+-
+-  nodeSubclasses = [];
+-  for (let id = 0, n = nodeTypeNamesById.length; id < n; id++) {
+-    nodeSubclasses[id] = SyntaxNode;
+-  }
+-
+-} catch (error) {
+-  console.error('Failed to initialize nodeSubclasses:', error.message);
+-}
+-
+-// Patch Parser.prototype.getLanguage to return our enhanced language object
+-const originalGetLanguage = Parser.prototype.getLanguage;
+-
+-if (originalGetLanguage && nodeSubclasses) {
+-  Parser.prototype.getLanguage = function() {
+-    const originalLanguage = originalGetLanguage.call(this);
+-
+-    // If this is our language, return a proxy with the required properties
+-    if (originalLanguage === language) {
+-      return new Proxy(originalLanguage, {
+-        get(target, prop) {
+-          if (prop === 'nodeSubclasses') return nodeSubclasses;
+-          if (prop === 'nodeTypeNamesById') return nodeTypeNamesById;
+-          if (prop === 'nodeFieldNamesById') return nodeFieldNamesById;
+-          return target[prop];
+-        }
+-      });
+-    }
+-
+-    return originalLanguage;
+-  };
+-
+-}
+-
+-module.exports = language;
++  module.exports.nodeTypeInfo = require("../../src/node-types.json");
++} catch (_) {}
