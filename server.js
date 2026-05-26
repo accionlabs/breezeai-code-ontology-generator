@@ -14,6 +14,7 @@ const {
 const { generateDescriptionsAsync, addMetadataAsync } = require("./llm-enrichment");
 const { analyzeConfigRepo } = require("./config/file-tree-mapper-config");
 const { parseDDL } = require("./sql/extract-ddl");
+const { buildEsRecords } = require("./elasticsearch/build-records");
 const { BREEZE_API_URL } = require("./app-config");
 const callHttp = require("./call-http");
 const { createS3UploadStream } = require("./s3-upload");
@@ -21,6 +22,14 @@ const { createS3UploadStream } = require("./s3-upload");
 // Multipart handler for single-file SQL uploads. Keeps the file in memory
 // (capped) so we can hand it straight to the DDL parser without temp files.
 const sqlUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 },
+});
+
+// Multipart handler for Elasticsearch mapping uploads. Accepts a primary
+// "mapping" file (one or more indices keyed at the top level) and an
+// optional "setting" file with the matching shards/replicas/analyzer info.
+const esUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 200 * 1024 * 1024 },
 });
@@ -845,6 +854,135 @@ app.post("/api/analyze-sql", sqlUpload.single("file"), async (req, res) => {
     });
   } catch (err) {
     console.error(`🌐 [analyze-sql] ✗ error after ${Date.now() - t0}ms:`, err);
+    const status = err.statusCode || 500;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// Elasticsearch dump analyzer: accepts up to two JSON files (mapping
+// and/or settings). Each file is content-sniffed to decide its kind, then:
+//   - emits __type:"es_index"    records for mapping files (one per index)
+//   - emits __type:"es_settings" records for settings-only uploads
+//   - when both kinds are uploaded together, settings are merged into the
+//     mapping records (no separate settings rows).
+// Streams the resulting NDJSON.gz to S3 and notifies the backend, which
+// routes by record __type to either full ingest or settings patch.
+// Mirrors /api/analyze-sql.
+// Keep this cap in sync with the backend's `/db-ontology/stream-ingest`
+// controller (maxCount in fileUplaodOptions). Multi-index ES dumps can
+// span 100+ files (mapping + settings per index).
+app.post("/api/analyze-es", esUpload.array("file", 200), async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const { projectUuid, dataLakeId, repositoryName } = req.body || {};
+    const llmPlatform = req.query.llmPlatform || req.body?.llmPlatform || "AWSBEDROCK";
+
+    const uploads = (req.files || []).map(f => ({
+      name: f.originalname || "uploaded.json",
+      text: f.buffer.toString("utf-8"),
+      size: f.size,
+    }));
+
+    console.log(
+      `🌐 [analyze-es] ← request: projectUuid=${projectUuid || "<missing>"}, ` +
+      `dataLakeId=${dataLakeId || "<missing>"}, repositoryName=${repositoryName || "<none>"}, ` +
+      `llmPlatform=${llmPlatform}, ` +
+      `files=[${uploads.map(u => `${u.name}(${u.size}b)`).join(", ") || "<none>"}]`,
+    );
+
+    if (uploads.length === 0) {
+      console.warn("🌐 [analyze-es] ✗ rejecting: no file in request");
+      return res.status(400).json({ error: "At least one multipart 'file' is required" });
+    }
+    if (!projectUuid) {
+      console.warn("🌐 [analyze-es] ✗ rejecting: projectUuid missing");
+      return res.status(400).json({ error: "projectUuid is required" });
+    }
+    if (!dataLakeId) {
+      console.warn("🌐 [analyze-es] ✗ rejecting: dataLakeId missing");
+      return res.status(400).json({ error: "dataLakeId is required" });
+    }
+
+    const parseStart = Date.now();
+    let build;
+    try {
+      build = buildEsRecords(uploads);
+    } catch (err) {
+      const status = err.statusCode || 422;
+      console.warn(`🌐 [analyze-es] ✗ build failed (${status}): ${err.message}`);
+      return res.status(status).json({ error: err.message });
+    }
+
+    console.log(
+      `🌐 [analyze-es] parse done in ${Date.now() - parseStart}ms — ` +
+      `mode=${build.kind}, indices=${build.indexCount}, fields=${build.fieldCount}, ` +
+      `settingsMatched=${build.settingsMatched}, records=${build.records.length}`,
+    );
+
+    // The S3 key is keyed by the first uploaded file's safe name plus a
+    // timestamp; settings-only batches get a "-settings" suffix so they are
+    // distinguishable from mapping uploads in S3 listings.
+    const primaryName = (build.mapping || build.setting).name;
+    const safeName = primaryName.replace(/[^a-zA-Z0-9_.-]+/g, "_");
+    const s3KeySuffix = build.kind === "settings-only" ? "-settings" : "";
+    const s3Key = `es-ontology/${projectUuid}/${dataLakeId}/${Date.now()}-${safeName}${s3KeySuffix}.ndjson.gz`;
+    const records = build.records;
+
+    console.log(`🌐 [analyze-es] streaming NDJSON.gz → s3://${s3Key}`);
+    const uploadStart = Date.now();
+    const { passThrough, uploadPromise } = createS3UploadStream(s3Key);
+    for (const record of records) {
+      passThrough.write(JSON.stringify(record) + "\n");
+    }
+    passThrough.end();
+    await uploadPromise;
+    console.log(
+      `🌐 [analyze-es] ✓ S3 upload complete in ${Date.now() - uploadStart}ms (${records.length} record(s))`,
+    );
+
+    // Fire-and-forget: notify backend.
+    // Unified callback: both SQL DDL and ES record streams notify the same
+    // backend endpoint. The backend service dispatches per-record by __type.
+    // `repositoryName` falls back to the primary upload filename so the
+    // resulting ESIndex/ESField nodes still carry source attribution.
+    const notifyUrl = `${BREEZE_API_URL}/db-ontology/stream-ingest-s3${llmPlatform ? `?llmPlatform=${encodeURIComponent(llmPlatform)}` : ""}`;
+    console.log(`🌐 [analyze-es] → POST ${notifyUrl}`);
+    const notifyStart = Date.now();
+    callHttp.httpPost(notifyUrl, {
+      s3Key,
+      projectUuid,
+      dataLakeId,
+      repositoryName: repositoryName || primaryName,
+    }).then((body) => {
+      console.log(
+        `🌐 [analyze-es] ✓ stream-ingest-s3 acknowledged in ${Date.now() - notifyStart}ms` +
+        (body ? ` — response: ${JSON.stringify(body).slice(0, 200)}` : ""),
+      );
+    }).catch((err) => {
+      console.error(`🌐 [analyze-es] ✗ stream-ingest-s3 notification failed: ${err.message}`);
+    });
+
+    console.log(`🌐 [analyze-es] ✓ request handled in ${Date.now() - t0}ms (mode=${build.kind})`);
+    res.status(202).json({
+      success: true,
+      s3Key,
+      mode: build.kind,
+      // `mapping`/`setting` carry the *first* file of each kind for back-compat
+      // with single-file callers; `mappings`/`settings` are the full lists.
+      mapping: build.mapping ? build.mapping.name : null,
+      setting: build.setting ? build.setting.name : null,
+      mappings: build.mappings.map((m) => m.name),
+      settings: build.settings.map((s) => s.name),
+      recordCount: build.records.length,
+      indexCount: build.indexCount,
+      fieldCount: build.fieldCount,
+      settingsMatched: build.settingsMatched,
+      message: build.kind === "mapping"
+        ? `ES mapping (${build.mappings.length} file${build.mappings.length === 1 ? "" : "s"}, ${build.indexCount} index${build.indexCount === 1 ? "" : "es"}) parsed; NDJSON.gz streamed to S3 and ingestion notification sent.`
+        : `ES settings (${build.settings.length} file${build.settings.length === 1 ? "" : "s"}) parsed; NDJSON.gz streamed to S3 and settings-patch notification sent.`,
+    });
+  } catch (err) {
+    console.error(`🌐 [analyze-es] ✗ error after ${Date.now() - t0}ms:`, err);
     const status = err.statusCode || 500;
     res.status(status).json({ error: err.message });
   }
