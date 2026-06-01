@@ -12,6 +12,7 @@ const Parser = require("tree-sitter");
 const PHP = require("tree-sitter-php").php;
 const { extractFunctionsAndCalls, extractImports, extractFileStatements } = require("./extract-functions-php");
 const { extractClasses } = require("./extract-classes-php");
+const { extractFileRoutes, extractYamlRoutes } = require("./extract-routes-php");
 const { readSource, parseSource } = require("../utils");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
@@ -22,6 +23,33 @@ function getPHPFiles(repoPath, ignorePatterns = null) {
   const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'php' });
   return glob.sync(`${repoPath}/**/*.php`, {
     ignore: patterns
+  });
+}
+
+// Drupal/Symfony YAML routing files (route definitions, not PHP).
+function getRoutingYamlFiles(repoPath, ignorePatterns = null) {
+  const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'php' });
+  const globs = [
+    `${repoPath}/**/*.routing.yml`,            // Drupal
+    `${repoPath}/**/routes.@(yaml|yml)`,        // Symfony
+    `${repoPath}/**/config/routes/**/*.@(yaml|yml)`,
+  ];
+  const seen = new Set();
+  for (const g of globs) {
+    for (const f of glob.sync(g, { ignore: patterns })) seen.add(f);
+  }
+  return [...seen];
+}
+
+// Attach routes: function-scoped to their handler method, else file-level.
+function attachPhpRoutes(routes, functions, statements) {
+  if (!routes || !routes.length) return;
+  routes.forEach((rt) => {
+    if (rt.scope === "function") {
+      const fn = functions.find((f) => f.name === rt.handler && f.startLine === rt.handlerLine);
+      if (fn) { (fn.statements || (fn.statements = [])).push(rt); return; }
+    }
+    statements.push(rt);
   });
 }
 
@@ -511,6 +539,12 @@ function analyzePHPRepo(repoPath, opts = {}) {
 
       const statements = opts.captureStatements ? extractFileStatements(file) : [];
 
+      // Detect routes: Laravel Route:: calls (file-scoped) + Symfony #[Route]
+      // attributes (attached to their handler method).
+      if (opts.captureStatements) {
+        attachPhpRoutes(extractFileRoutes(file), functions, statements);
+      }
+
       const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
@@ -532,6 +566,33 @@ function analyzePHPRepo(repoPath, opts = {}) {
 
   process.stdout.write('\r' + ' '.repeat(150) + '\r');
   console.log(`✅ Completed processing ${totalFiles} PHP files\n`);
+
+  // -----------------------------------------------------------
+  // Drupal/Symfony YAML routing files -> one fileResult each,
+  // carrying the routes as file-level `route` statements.
+  // -----------------------------------------------------------
+  if (opts.captureStatements) {
+    const yamlFiles = getRoutingYamlFiles(repoPath);
+    if (yamlFiles.length) console.log(`📊 Routing YAML files to process: ${yamlFiles.length}`);
+    for (const yfile of yamlFiles) {
+      try {
+        const routes = extractYamlRoutes(yfile);
+        if (!routes.length) continue;
+        const yamlResult = {
+          path: path.relative(repoPath, yfile),
+          importFiles: [],
+          externalImports: [],
+          functions: [],
+          classes: [],
+          statements: routes,
+        };
+        if (opts.onResult) opts.onResult(yamlResult);
+        else results.push(yamlResult);
+      } catch (e) {
+        console.log(`❌ Error analyzing routing file: ${yfile} - ${e.message}`);
+      }
+    }
+  }
 
   return results || [];
 }

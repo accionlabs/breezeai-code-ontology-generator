@@ -12,6 +12,7 @@ const path = require("path");
 const glob = require("glob");
 const { extractFunctionsAndCalls, extractImports, extractFileStatements } = require("./extract-functions-python");
 const { extractClasses } = require("./extract-classes-python");
+const { extractFileRoutes } = require("./extract-routes-python");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // -------------------------------------------------------------
@@ -119,13 +120,36 @@ function analyzeFiles(repoPath, opts = {}) {
 
       const statements = opts.captureStatements ? extractFileStatements(file) : [];
 
+      // Detect web-framework routes (Django / Flask / FastAPI) and surface
+      // them as `route` statements flowing through the HAS_STATEMENT pipeline.
+      //   - Flask/FastAPI decorator routes (scope "function") attach to their
+      //     handler Function node, mirroring the JS `api_call` convention.
+      //   - Django urls.py routes, mounts and includes (scope "file") attach
+      //     to the File node, since their views are referenced by name.
+      const routes = opts.captureStatements ? extractFileRoutes(file) : [];
+      if (routes.length) {
+        routes.forEach(rt => {
+          if (rt.scope === "function") {
+            const fn = functions.find(
+              f => f.name === rt.handler && f.startLine === rt.handlerLine
+            );
+            if (fn) {
+              (fn.statements || (fn.statements = [])).push(rt);
+              return;
+            }
+          }
+          statements.push(rt); // file-level (Django) or unmatched fallback
+        });
+      }
+
       const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions,
         classes,
-        statements
+        statements,
+        routes
       };
       if (opts.onResult) {
         opts.onResult(fileResult);

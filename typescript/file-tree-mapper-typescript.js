@@ -13,6 +13,8 @@ const path = require("path");
 const glob = require("glob");
 const { extractFunctionsAndCalls, extractImports: extractImportsTS, extractFileStatements } = require("./extract-functions-typescript");
 const { extractClasses } = require("./extract-classes-typescript");
+const { extractFileRoutes } = require("./extract-routes-typescript");
+const { attachRoutes } = require("../routes-js-core");
 const { loadPathAliases, resolveWithAlias } = require("./resolve-path-aliases");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
@@ -169,6 +171,12 @@ function analyzeTypeScriptFiles(repoPath, pathAliases, opts = {}) {
       const classes = extractClasses(file, repoPath, opts.captureStatements);
 
       const statements = opts.captureStatements ? extractFileStatements(file) : [];
+
+      // Detect server routes (Express/Fastify/Koa calls + NestJS decorators).
+      // Decorator routes (scope "function") attach to their handler method;
+      // call-based routes (scope "file") attach to the File node.
+      const routes = opts.captureStatements ? extractFileRoutes(file) : [];
+      attachRoutes(routes, functions, statements);
 
       const fileResult = {
         path: path.relative(repoPath, file),

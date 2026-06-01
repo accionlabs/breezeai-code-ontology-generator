@@ -8,6 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const { extractFunctionsAndCalls, extractImports, extractFileStatements } = require("./extract-functions-java");
 const { extractClasses } = require("./extract-classes-java");
+const { extractFileRoutes } = require("./extract-routes-java");
 
 const { repoPath, files, classIndex, captureSourceCode, captureStatements } = workerData;
 
@@ -19,6 +20,22 @@ function analyzeFile(filePath) {
         const classes = extractClasses(filePath, repoPath, captureStatements);
 
         const statements = captureStatements ? extractFileStatements(filePath) : [];
+
+        // Detect Spring / JAX-RS routes and attach each to its handler method
+        // (matched by name + startLine), mirroring the Python route convention.
+        const routes = captureStatements ? extractFileRoutes(filePath) : [];
+        if (routes.length) {
+            routes.forEach(rt => {
+                const fn = functions.find(
+                    f => f.name === rt.handler && f.startLine === rt.handlerLine
+                );
+                if (fn) {
+                    (fn.statements || (fn.statements = [])).push(rt);
+                } else {
+                    statements.push(rt); // fallback: file-level
+                }
+            });
+        }
 
         return {
             path: path.relative(repoPath, filePath),

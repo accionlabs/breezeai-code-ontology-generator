@@ -11,7 +11,20 @@ const path = require("path");
 const glob = require("glob");
 const { analyzeVBNetFileWithRegex } = require("./regex-parser-vbnet");
 const { extractFileStatements } = require("./extract-functions-vbnet");
+const { extractFileRoutes } = require("./extract-routes-vbnet");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
+
+// Attach routes: function-scoped to their handler action (name + startLine), else file-level.
+function attachVBNetRoutes(routes, functions, statements) {
+  if (!routes || !routes.length) return;
+  routes.forEach((rt) => {
+    if (rt.scope === "function") {
+      const fn = functions.find((f) => f.name === rt.handler && f.startLine === rt.handlerLine);
+      if (fn) { (fn.statements || (fn.statements = [])).push(rt); return; }
+    }
+    statements.push(rt);
+  });
+}
 
 // Try to load tree-sitter, but don't fail if it doesn't work
 let Parser, VBNet, treeSitterAvailable = false;
@@ -316,6 +329,12 @@ function analyzeVBNetRepo(repoPath, opts = {}) {
       });
 
       const statements = opts.captureStatements ? extractFileStatements(file) : [];
+
+      // Detect ASP.NET controller routes (<HttpGet>/<Route> attributes) and
+      // attach each to its handler action.
+      if (opts.captureStatements) {
+        attachVBNetRoutes(extractFileRoutes(file), analysis.functions, statements);
+      }
 
       const fileResult = {
         path: path.relative(repoPath, file),

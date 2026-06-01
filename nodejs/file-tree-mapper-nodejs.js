@@ -14,6 +14,8 @@ const Parser = require("tree-sitter");
 const JavaScript = require("tree-sitter-javascript");
 const { extractFuncitonAndItsCalls, extractImports: extractImportsJS, extractFileStatements } = require("./extract-functions-nodejs");
 const { extractClasses } = require("./extract-classes-nodejs");
+const { extractFileRoutes } = require("./extract-routes-nodejs");
+const { attachRoutes } = require("../routes-js-core");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // -------------------------------------------------------------
@@ -243,6 +245,12 @@ function analyzeImports(repoPath, mapper, opts = {}) {
       const classes = extractClasses(file, repoPath, opts.captureStatements)
 
       const statements = opts.captureStatements ? extractFileStatements(file) : [];
+
+      // Detect server routes (Express/Fastify/Koa calls + NestJS decorators).
+      // Decorator routes (scope "function") attach to their handler method;
+      // call-based routes (scope "file") attach to the File node.
+      const routes = opts.captureStatements ? extractFileRoutes(file) : [];
+      attachRoutes(routes, functions, statements);
 
       const fileResult = {
         path: path.relative(repoPath, file),

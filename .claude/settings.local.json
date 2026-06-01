@@ -26,7 +26,21 @@
       "Read(//mnt/c/Users/AnirudhaGohokar/Desktop/projects/breeze.ai/repositories/BREEZE.AI_WEBUI/**)",
       "Bash(node -e \"require\\(''./typescript/extract-functions-typescript''\\)\")",
       "Bash(node -e \"require\\(''./python/extract-functions-python''\\)\")",
-      "Bash(node -e \"require\\(''./java/extract-functions-java''\\)\")"
+      "Bash(node -e \"require\\(''./java/extract-functions-java''\\)\")",
+      "Bash(git -C /home/anil/workspace/breezeai-code-ontology-generator status --short)",
+      "Bash(git -C /home/anil/workspace/breezeai-backend status --short)",
+      "Bash(git *)",
+      "Bash(sed -n '240,272p' nodejs/file-tree-mapper-nodejs.js)",
+      "Bash(sed -n '165,195p' typescript/file-tree-mapper-typescript.js)",
+      "Bash(sed -n '100,140p' php/extract-classes-php.js)",
+      "Bash(sed -n '32,75p' php/extract-functions-php.js)",
+      "Bash(sed -n '95,125p' csharp/extract-classes-csharp.js)",
+      "Bash(sed -n '1,60p' csharp/extract-functions-csharp.js)",
+      "Bash(sed -n '146,165p' golang/file-tree-mapper-golang.js)",
+      "Bash(sed -n '8p' golang/file-tree-mapper-golang.js)",
+      "Bash(python3 -)",
+      "Bash(sed -n '80,95p' .repoignore)",
+      "Bash(sed -n '31,92p' ignore-patterns.js)"
     ]
   }
 }

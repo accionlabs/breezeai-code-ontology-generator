@@ -130,8 +130,12 @@ async function analyzeFiles(repoPath, opts = {}) {
     extractPackages,
     initParser: initClassParser,
   } = require("./extract-classes-perl");
+  const {
+    extractFileRoutes,
+    initParser: initRouteParser,
+  } = require("./extract-routes-perl");
 
-  await Promise.all([initExtParser(), initClassParser()]);
+  await Promise.all([initExtParser(), initClassParser(), initRouteParser()]);
 
   const packageMapper = await buildPackageMapper(repoPath, perlFiles);
 
@@ -185,6 +189,21 @@ async function analyzeFiles(repoPath, opts = {}) {
       const statements = opts.captureStatements
         ? await extractFileStatements(file)
         : [];
+
+      // Detect routes (Dancer/Mojolicious DSL + routes object, file-scoped;
+      // Catalyst sub attributes attached to their handler sub).
+      if (opts.captureStatements) {
+        const routes = await extractFileRoutes(file);
+        routes.forEach((rt) => {
+          if (rt.scope === "function") {
+            const fn = functions.find(
+              (f) => f.name === rt.handler && f.startLine === rt.handlerLine,
+            );
+            if (fn) { (fn.statements || (fn.statements = [])).push(rt); return; }
+          }
+          statements.push(rt);
+        });
+      }
 
       const fileResult = {
         path: path.relative(repoPath, file),

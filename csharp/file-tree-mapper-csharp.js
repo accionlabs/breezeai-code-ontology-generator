@@ -12,7 +12,20 @@ const Parser = require("tree-sitter");
 const CSharp = require("tree-sitter-c-sharp");
 const { extractFunctionsAndCalls, extractImports, extractFileStatements } = require("./extract-functions-csharp");
 const { extractClasses } = require("./extract-classes-csharp");
+const { extractFileRoutes } = require("./extract-routes-csharp");
 const { readSource, parseSource } = require("../utils");
+
+// Attach routes: function-scoped to their handler method, else file-level.
+function attachCSharpRoutes(routes, functions, statements) {
+  if (!routes || !routes.length) return;
+  routes.forEach((rt) => {
+    if (rt.scope === "function") {
+      const fn = functions.find((f) => f.name === rt.handler && f.startLine === rt.handlerLine);
+      if (fn) { (fn.statements || (fn.statements = [])).push(rt); return; }
+    }
+    statements.push(rt);
+  });
+}
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // -------------------------------------------------------------
@@ -379,6 +392,12 @@ function analyzeCSharpRepo(repoPath, opts = {}) {
       const classes = extractClasses(file, repoPath, opts.captureStatements);
 
       const statements = opts.captureStatements ? extractFileStatements(file) : [];
+
+      // Detect ASP.NET routes: controller [HttpGet]/[Route] attributes
+      // (attached to handler method) + minimal-API MapGet/etc. (file-scoped).
+      if (opts.captureStatements) {
+        attachCSharpRoutes(extractFileRoutes(file), functions, statements);
+      }
 
       const fileResult = {
         path: path.relative(repoPath, file),
