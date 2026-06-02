@@ -7,6 +7,7 @@ const Parser = require("tree-sitter");
 const Go = require("tree-sitter-go");
 const { extractFunctionsAndCalls, extractImports: extractImportsGo, extractFileStatements } = require("./extract-functions-golang");
 const { extractClasses } = require("./extract-classes-golang");
+const { extractFileRoutes } = require("./extract-routes-golang");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 const parser = new Parser();
@@ -150,6 +151,12 @@ function analyzeImports(repoPath, opts = {}) {
       const classes = extractClasses(file, repoPath, opts.captureStatements);
 
       const statements = opts.captureStatements ? extractFileStatements(file) : [];
+
+      // Detect routes (Gin/chi/gorilla/net/http) as file-level statements.
+      if (opts.captureStatements) {
+        const routes = extractFileRoutes(file);
+        if (routes.length) statements.push(...routes);
+      }
 
       const fileResult = {
         path: path.relative(repoPath, file),

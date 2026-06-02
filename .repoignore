@@ -83,11 +83,15 @@ specs/
 # DOCUMENTATION / EXAMPLES
 ################################################
 
-docs/
-documentation/
-examples/
-samples/
-demo/
+# Root-anchored: these are common deep-package segments (e.g. the default
+# Spring package com.example.demo, org.springframework.samples.*), so a bare
+# `samples/` would silently drop real source. Anchor to repo root to skip only
+# top-level docs/example/demo folders.
+/docs/
+/documentation/
+/examples/
+/samples/
+/demo/
 
 ################################################
 # BINARY / STATIC ASSETS

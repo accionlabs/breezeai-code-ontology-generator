@@ -11,6 +11,17 @@ const Parser = require("tree-sitter");
 const apex = require("tree-sitter-sfapex");
 const { extractFunctionsAndCalls, extractReferences, extractFileStatements } = require("./extract-functions-salesforce");
 const { extractClasses } = require("./extract-classes-salesforce");
+const { extractFileRoutes } = require("./extract-routes-salesforce");
+
+// Attach Apex REST routes to their handler method (name + startLine).
+function attachApexRoutes(routes, functions, statements) {
+  if (!routes || !routes.length) return;
+  routes.forEach((rt) => {
+    const fn = functions.find((f) => f.name === rt.handler && f.startLine === rt.handlerLine);
+    if (fn) { (fn.statements || (fn.statements = [])).push(rt); return; }
+    statements.push(rt);
+  });
+}
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // Wrapper function to analyze Salesforce Apex repository
@@ -262,6 +273,12 @@ function analyzeApexFiles(repoPath, classIndex, opts = {}) {
       const classes = extractClasses(file, repoPath, opts.captureStatements);
 
       const statements = opts.captureStatements ? extractFileStatements(file) : [];
+
+      // Detect Apex REST routes (@RestResource urlMapping + @HttpGet/etc.),
+      // attached to their handler method.
+      if (opts.captureStatements) {
+        attachApexRoutes(extractFileRoutes(file), functions, statements);
+      }
 
       const fileResult = {
         path: path.relative(repoPath, file),

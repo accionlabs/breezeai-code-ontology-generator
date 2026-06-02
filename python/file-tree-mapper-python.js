@@ -12,6 +12,7 @@ const path = require("path");
 const glob = require("glob");
 const { extractFunctionsAndCalls, extractImports, extractFileStatements } = require("./extract-functions-python");
 const { extractClasses } = require("./extract-classes-python");
+const { extractFileRoutes } = require("./extract-routes-python");
 const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 
 // -------------------------------------------------------------
@@ -65,8 +66,51 @@ function resolveImportPath(importSource, currentFilePath, repoPath) {
   if (fs.existsSync(path.join(resolvedPath, "__init__.py"))) {
     return path.relative(repoPath, path.join(resolvedPath, "__init__.py"));
   }
-  
+
   return null;
+}
+
+/**
+ * Resolve an ABSOLUTE intra-repo import (e.g. `app.core.config`,
+ * `app.api.routes`) to the repo-relative file paths it points at.
+ *
+ * Python absolute imports don't start with "." so resolveImportPath() skips
+ * them and they used to be classified as external — leaving Python files with
+ * no File→File IMPORTS edges. We map the dotted module to a path and look it up
+ * against the actual set of repo files:
+ *   - `a.b.c`            → a/b/c.py  or  a/b/c/__init__.py   (module / package)
+ *   - `from a.b import c`→ a/b/c.py  or  a/b/c/__init__.py   (c is a submodule)
+ * `importedNames` lets us catch the common `from pkg import submodule` form.
+ *
+ * `fileSet` is the set of repo-relative ("/"-separated) paths of every .py file.
+ * Exact lookup covers the root-package layout (this repo: `app/` at root);
+ * a boundary-aware suffix match handles repos nested under a source root
+ * (e.g. file `src/app/core/config.py` for import `app.core.config`).
+ */
+function resolveAbsoluteImport(moduleSource, importedNames, fileSet) {
+  const base = moduleSource.split(".").filter(Boolean).join("/");
+  if (!base) return [];
+
+  const candidates = [`${base}.py`, `${base}/__init__.py`];
+  (importedNames || []).forEach(name => {
+    candidates.push(`${base}/${name}.py`, `${base}/${name}/__init__.py`);
+  });
+
+  const resolved = new Set();
+  for (const cand of candidates) {
+    if (fileSet.has(cand)) {
+      resolved.add(cand);
+      continue;
+    }
+    // Suffix fallback for source-root prefixes (src/, backend/, ...).
+    for (const f of fileSet) {
+      if (f.endsWith("/" + cand)) {
+        resolved.add(f);
+        break;
+      }
+    }
+  }
+  return [...resolved];
 }
 
 // -------------------------------------------------------------
@@ -76,6 +120,12 @@ function analyzeFiles(repoPath, opts = {}) {
   const pyFiles = getPythonFiles(repoPath);
   const results = opts.onResult ? null : [];
   const totalFiles = pyFiles.length;
+
+  // Index of every repo file (repo-relative, "/"-separated) so absolute
+  // intra-repo imports can be resolved to File→File IMPORTS edges.
+  const fileSet = new Set(
+    pyFiles.map(f => path.relative(repoPath, f).split(path.sep).join("/"))
+  );
 
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let spinnerIndex = 0;
@@ -108,8 +158,14 @@ function analyzeFiles(repoPath, opts = {}) {
             importFiles.push(resolvedPath);
           }
         } else if (importSource) {
-          // External/absolute import
-          externalImports.push(importSource);
+          // Absolute import: resolve against the repo first; only treat as an
+          // external package if it doesn't map to a file inside the repo.
+          const resolved = resolveAbsoluteImport(importSource, imp.imported, fileSet);
+          if (resolved.length) {
+            importFiles.push(...resolved);
+          } else {
+            externalImports.push(importSource);
+          }
         }
       });
 
@@ -119,13 +175,36 @@ function analyzeFiles(repoPath, opts = {}) {
 
       const statements = opts.captureStatements ? extractFileStatements(file) : [];
 
+      // Detect web-framework routes (Django / Flask / FastAPI) and surface
+      // them as `route` statements flowing through the HAS_STATEMENT pipeline.
+      //   - Flask/FastAPI decorator routes (scope "function") attach to their
+      //     handler Function node, mirroring the JS `api_call` convention.
+      //   - Django urls.py routes, mounts and includes (scope "file") attach
+      //     to the File node, since their views are referenced by name.
+      const routes = opts.captureStatements ? extractFileRoutes(file) : [];
+      if (routes.length) {
+        routes.forEach(rt => {
+          if (rt.scope === "function") {
+            const fn = functions.find(
+              f => f.name === rt.handler && f.startLine === rt.handlerLine
+            );
+            if (fn) {
+              (fn.statements || (fn.statements = [])).push(rt);
+              return;
+            }
+          }
+          statements.push(rt); // file-level (Django) or unmatched fallback
+        });
+      }
+
       const fileResult = {
         path: path.relative(repoPath, file),
         importFiles: [...new Set(importFiles)],
         externalImports: [...new Set(externalImports)],
         functions,
         classes,
-        statements
+        statements,
+        routes
       };
       if (opts.onResult) {
         opts.onResult(fileResult);

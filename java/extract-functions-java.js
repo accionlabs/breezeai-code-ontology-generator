@@ -233,15 +233,21 @@ function extractImports(filePath, classIndex) {
     externalImports: []
   };
 
+  // Repo-relative file paths, used for layout-agnostic suffix matching when the
+  // path-derived FQCN index misses (see classifyImport).
+  const fileList = [...new Set(Object.values(classIndex))];
+
   traverse(tree.rootNode, (node) => {
     if (node.type === "import_declaration") {
+      // Strip the leading `import`/`static` keywords and trailing `;` without
+      // touching package segments that merely contain those substrings
+      // (e.g. `com.importantthing.Foo`).
       const importText = source.slice(node.startIndex, node.endIndex)
-        .replace("import", "")
-        .replace("static", "")
-        .replace(";", "")
+        .replace(/^\s*import\s+(?:static\s+)?/, "")
+        .replace(/\s*;.*$/, "")
         .trim();
 
-      const resolved = classifyImport(importText, classIndex);
+      const resolved = classifyImport(importText, classIndex, fileList);
       if (resolved.type === "local") {
         imports.importFiles.push(...resolved.values);
       } else {
@@ -256,7 +262,18 @@ function extractImports(filePath, classIndex) {
   return imports;
 }
 
-function classifyImport(importName, classIndex) {
+/**
+ * Match an import path against the repo file list by path suffix, so imports
+ * resolve regardless of the source-root layout (Maven `src/main/java/`, Bazel
+ * `java/`, plain `src/`, a package root at the repo root, etc.). `com.example.Foo`
+ * matches any file whose path == or ends with `/com/example/Foo.java`.
+ */
+function suffixMatchFiles(dottedPath, fileList) {
+  const suffix = dottedPath.replace(/\./g, "/") + ".java";
+  return fileList.filter(f => f === suffix || f.endsWith("/" + suffix));
+}
+
+function classifyImport(importName, classIndex, fileList = []) {
   // Java standard library
   if (isJavaStdLib(importName)) {
     return { type: "external", values: [importName] };
@@ -266,9 +283,18 @@ function classifyImport(importName, classIndex) {
   if (importName.endsWith(".*")) {
     const prefix = importName.replace(".*", "");
 
-    const matched = Object.entries(classIndex)
+    let matched = Object.entries(classIndex)
       .filter(([fqcn]) => fqcn.startsWith(prefix + "."))
       .map(([_, file]) => file);
+
+    // Layout-agnostic fallback: any file under the imported package directory.
+    if (matched.length === 0) {
+      const dir = prefix.replace(/\./g, "/") + "/";
+      matched = fileList.filter(
+        f => (f.startsWith(dir) || f.includes("/" + dir)) &&
+             f.slice(f.indexOf(dir) + dir.length).indexOf("/") === -1
+      );
+    }
 
     if (matched.length > 0) {
       return { type: "local", values: matched };
@@ -283,6 +309,13 @@ function classifyImport(importName, classIndex) {
       type: "local",
       values: [classIndex[importName]]
     };
+  }
+
+  // Layout-agnostic fallback: match the import path against the repo file list
+  // by suffix (handles non-Maven source roots the FQCN index doesn't strip).
+  const suffixMatched = suffixMatchFiles(importName, fileList);
+  if (suffixMatched.length > 0) {
+    return { type: "local", values: suffixMatched };
   }
 
   // Unresolved → external dependency
