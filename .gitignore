@@ -3,7 +3,8 @@ node_modules/
 output/
 .DS_Store
 .env
-.claude
+./.claude/
 breeze
 lmreborn
 .breeze.json
+setttings.local.json

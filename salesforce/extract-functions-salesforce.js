@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const Apex = require("tree-sitter-sfapex");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getStatementTextLimit } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getStatementTextLimit, extractReturnTypeByField } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(Apex.apex);
@@ -35,6 +35,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
 
   const name = getFunctionName(node, source);
   const params = extractFunctionParams(node, source);
+  const returnType = extractReturnType(node, source);
   const calls = extractDirectCalls(node, source);
 
   const { visibility, kind } = getFunctionModifiers(node, source);
@@ -47,6 +48,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
     visibility,
     kind,
     params,
+    returnType,
     startLine,
     endLine,
     calls,
@@ -58,6 +60,12 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
   }
 
   return result;
+}
+
+// Apex method return type lives in the `type` field (including `void`).
+// Constructors have no return type → null.
+function extractReturnType(node, source) {
+  return extractReturnTypeByField(node, source, { field: "type", skipTypes: ["constructor_declaration"] });
 }
 
 function getFunctionModifiers(node, source) {

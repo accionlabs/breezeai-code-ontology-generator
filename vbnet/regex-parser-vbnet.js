@@ -19,14 +19,15 @@ const PATTERNS = {
   // Implements clause
   implements: /^\s*Implements\s+(.+?)$/gmi,
 
-  // Function declaration
-  functionDeclaration: /^\s*((?:Public|Private|Protected|Friend|Protected\s+Friend)?\s*(?:Shared|Overridable|MustOverride|Overrides|NotOverridable|Overloads)?\s*(?:Async)?\s*Function)\s+(\w+)\s*\(([^)]*)\)(?:\s+As\s+(\w+))?/gmi,
+  // Function declaration (return type captured fully: generics `List(Of T)`,
+  // arrays `Integer()`, and qualified names `System.String`)
+  functionDeclaration: /^\s*((?:Public|Private|Protected|Friend|Protected\s+Friend)?\s*(?:Shared|Overridable|MustOverride|Overrides|NotOverridable|Overloads)?\s*(?:Async)?\s*Function)\s+(\w+)\s*\(([^)]*)\)(?:\s+As\s+(.+?))?(?:\s+Implements\b.*)?\s*$/gmi,
 
   // Sub declaration
   subDeclaration: /^\s*((?:Public|Private|Protected|Friend|Protected\s+Friend)?\s*(?:Shared|Overridable|MustOverride|Overrides|NotOverridable|Overloads)?\s*(?:Async)?\s*Sub)\s+(\w+)\s*\(([^)]*)\)/gmi,
 
   // Property declaration
-  propertyDeclaration: /^\s*((?:Public|Private|Protected|Friend|Protected\s+Friend)?\s*(?:Shared|Overridable|MustOverride|Overrides|NotOverridable|ReadOnly|WriteOnly)?\s*Property)\s+(\w+)(?:\s*\(([^)]*)\))?(?:\s+As\s+(\w+))?/gmi,
+  propertyDeclaration: /^\s*((?:Public|Private|Protected|Friend|Protected\s+Friend)?\s*(?:Shared|Overridable|MustOverride|Overrides|NotOverridable|ReadOnly|WriteOnly)?\s*Property)\s+(\w+)(?:\s*\(([^)]*)\))?(?:\s+As\s+(.+?))?(?:\s+Implements\b.*)?\s*$/gmi,
 
   // Imports statement
   importsStatement: /^\s*Imports\s+(.+?)$/gmi,
@@ -328,6 +329,7 @@ function extractFunctionsFromSource(source, filePath, repoPath, captureSourceCod
       const modifiers = funcMatch[1];
       const name = funcMatch[2];
       const params = parseParameters(funcMatch[3]);
+      const returnType = funcMatch[4] ? funcMatch[4].trim() : null;
 
       currentFunc = {
         name,
@@ -335,6 +337,7 @@ function extractFunctionsFromSource(source, filePath, repoPath, captureSourceCod
         visibility: parseVisibility(modifiers),
         kind: parseKind(modifiers),
         params,
+        returnType,
         startLine: lineNum,
         endLine: lineNum,
         calls: []
@@ -360,6 +363,7 @@ function extractFunctionsFromSource(source, filePath, repoPath, captureSourceCod
         visibility: parseVisibility(modifiers),
         kind: parseKind(modifiers),
         params,
+        returnType: null, // VB.NET Sub returns nothing
         startLine: lineNum,
         endLine: lineNum,
         calls: []
@@ -378,6 +382,7 @@ function extractFunctionsFromSource(source, filePath, repoPath, captureSourceCod
       const modifiers = propMatch[1];
       const name = propMatch[2];
       const params = parseParameters(propMatch[3] || "");
+      const returnType = propMatch[4] ? propMatch[4].trim() : null;
 
       currentFunc = {
         name,
@@ -385,6 +390,7 @@ function extractFunctionsFromSource(source, filePath, repoPath, captureSourceCod
         visibility: parseVisibility(modifiers),
         kind: parseKind(modifiers),
         params,
+        returnType,
         startLine: lineNum,
         endLine: lineNum,
         calls: []

@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const Python = require("tree-sitter-python");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getStatementTextLimit } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getStatementTextLimit, extractReturnTypeByField } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(Python);
@@ -32,6 +32,7 @@ function extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode
 
   const name = getFunctionName(node, source);
   const params = extractFunctionParams(node, source);
+  const returnType = extractReturnType(node, source);
   const calls = extractDirectCalls(node, source);
 
   // Check if it's a method (inside a class)
@@ -62,6 +63,7 @@ function extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode
     visibility,
     kind,
     params,
+    returnType,
     startLine,
     endLine,
     calls,
@@ -78,6 +80,12 @@ function extractFunctionInfo(node, filePath, repoPath, source, captureSourceCode
 function getFunctionName(node, source) {
   const nameNode = node.childForFieldName("name");
   return nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null;
+}
+
+// Python return type lives in the `return_type` field (the `-> Type` annotation).
+// null for functions without a declared annotation (consistent with TypeScript).
+function extractReturnType(node, source) {
+  return extractReturnTypeByField(node, source, { field: "return_type", stripPrefix: /^->\s*/ });
 }
 
 function extractFunctionParams(node, source) {

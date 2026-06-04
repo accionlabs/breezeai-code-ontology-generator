@@ -392,10 +392,44 @@ function getStatementTextLimit(node) {
   return STATEMENT_TEXT_LIMIT;
 }
 
+/**
+ * Extract a function/method's declared return type from a tree-sitter node by
+ * reading a named field off the node. Shared by the per-language extractors
+ * (BREEZEAI-698) so the slice/guard/strip logic lives in one place.
+ *
+ * @param {object} node - tree-sitter function/method node
+ * @param {string} source - full source text the node was parsed from
+ * @param {object} [opts]
+ * @param {string|string[]} opts.field - field name(s) holding the return type;
+ *   when an array, the first field that resolves to a child node wins
+ *   (e.g. C# tries `returns` then `type`).
+ * @param {string[]} [opts.skipTypes] - node types that never have a return type
+ *   (e.g. `constructor_declaration`) → returns null.
+ * @param {RegExp} [opts.stripPrefix] - leading syntax to drop from the captured
+ *   text, e.g. `-> ` (Python) or `: ` (TypeScript).
+ * @returns {string|null} the return type text, or null when undeclared/void.
+ */
+function extractReturnTypeByField(node, source, { field, skipTypes = [], stripPrefix } = {}) {
+  if (skipTypes.includes(node.type)) return null;
+
+  const fields = Array.isArray(field) ? field : [field];
+  let typeNode = null;
+  for (const name of fields) {
+    typeNode = node.childForFieldName(name);
+    if (typeNode) break;
+  }
+  if (!typeNode) return null;
+
+  let text = source.slice(typeNode.startIndex, typeNode.endIndex);
+  if (stripPrefix) text = text.replace(stripPrefix, "");
+  return text.trim() || null;
+}
+
 module.exports = {
   truncateSourceCode, readSource, parseSource,
   containsDbQuery, getDbFromMethod, DB_METHOD_MAP, QUERY_PATTERNS,
   getApiCallInfo, extractEndpointFromArgs, extractEndpointFromValueNode, extractMethodFromOptions,
   API_CLIENT_NAMES, API_BARE_FUNCTIONS, HTTP_METHODS,
-  getStatementTextLimit, STATEMENT_TEXT_LIMIT, FUNCTION_DECL_TEXT_LIMIT
+  getStatementTextLimit, STATEMENT_TEXT_LIMIT, FUNCTION_DECL_TEXT_LIMIT,
+  extractReturnTypeByField
 };

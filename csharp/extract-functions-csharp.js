@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const CSharp = require("tree-sitter-c-sharp");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getStatementTextLimit } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getStatementTextLimit, extractReturnTypeByField } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(CSharp);
@@ -36,6 +36,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
 
   const name = getFunctionName(node, source);
   const params = extractFunctionParams(node, source);
+  const returnType = extractReturnType(node, source);
   const calls = extractDirectCalls(node, source);
 
   const { visibility, kind } = getFunctionModifiers(node, source);
@@ -48,6 +49,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
     visibility,
     kind,
     params,
+    returnType,
     startLine,
     endLine,
     calls,
@@ -59,6 +61,15 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
   }
 
   return result;
+}
+
+// C# return type lives in the `returns` field for method_declaration but in the
+// `type` field for local_function_statement. Constructors have no return type → null.
+function extractReturnType(node, source) {
+  return extractReturnTypeByField(node, source, {
+    field: ["returns", "type"],
+    skipTypes: ["constructor_declaration"],
+  });
 }
 
 function getFunctionType(node) {

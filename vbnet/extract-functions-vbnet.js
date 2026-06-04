@@ -38,6 +38,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
 
   const name = getFunctionName(node, source);
   const params = extractFunctionParams(node, source);
+  const returnType = extractReturnType(node, source);
   const calls = extractDirectCalls(node, source);
 
   const { visibility, kind } = getFunctionModifiers(node, source);
@@ -50,6 +51,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
     visibility,
     kind,
     params,
+    returnType,
     startLine,
     endLine,
     calls,
@@ -61,6 +63,49 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
   }
 
   return result;
+}
+
+// VB.NET return type lives in the `return_type` field (the `As Type` clause on a
+// Function). Properties expose it via a nested `as_clause` child instead, so fall
+// back to that. Subs, constructors, and untyped declarations have none → null.
+//
+// The tree-sitter-vb-dotnet grammar mis-parses generic syntax (`List(Of T)`) into
+// ERROR nodes and truncates the field's byte range before the closing `)`, so we
+// rebalance any unclosed parens from the source. See BREEZEAI-698.
+function extractReturnType(node, source) {
+  let typeNode = node.childForFieldName("return_type");
+  if (!typeNode) {
+    const asClause = node.namedChildren.find((c) => c.type === "as_clause");
+    if (asClause) typeNode = asClause.childForFieldName("type") || asClause;
+  }
+  if (!typeNode) return null;
+
+  let text = source
+    .slice(typeNode.startIndex, typeNode.endIndex)
+    .replace(/^As\s+/, "")
+    .trim();
+  return balanceTrailingParens(text, source, typeNode.endIndex) || null;
+}
+
+// Extend `text` from `source` to include closing parens the grammar dropped when
+// it produced ERROR nodes for VB generics, e.g. `List(Of String` → `List(Of String)`.
+function balanceTrailingParens(text, source, endIndex) {
+  let depth = 0;
+  for (const ch of text) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+  }
+  if (depth <= 0) return text;
+  let i = endIndex;
+  let extra = "";
+  while (i < source.length && depth > 0) {
+    const ch = source[i];
+    extra += ch;
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    i++;
+  }
+  return (text + extra).trim();
 }
 
 function getFunctionType(node) {

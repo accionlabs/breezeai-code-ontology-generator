@@ -9,7 +9,7 @@
     "add-metadata": "node add-metadata.js",
     "upload-docs": "node cli.js upload-docs",
     "serve": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node test/extract-return-type.test.js",
     "postinstall": "node install-safe.js"
   },
   "bin": {

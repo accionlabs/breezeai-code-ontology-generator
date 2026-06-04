@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const PHP = require("tree-sitter-php").php;
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getStatementTextLimit } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getStatementTextLimit, extractReturnTypeByField } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(PHP);
@@ -35,6 +35,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
 
   const name = getFunctionName(node, source);
   const params = extractFunctionParams(node, source);
+  const returnType = extractReturnType(node, source);
   const calls = extractDirectCalls(node, source);
 
   const { visibility, kind } = getFunctionModifiers(node, source);
@@ -47,6 +48,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
     visibility,
     kind,
     params,
+    returnType,
     startLine,
     endLine,
     calls,
@@ -58,6 +60,12 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
   }
 
   return result;
+}
+
+// PHP 7+ return type hint lives in the `return_type` field (the `: Type` clause,
+// including nullable `?Type` and union types). null when no hint is declared.
+function extractReturnType(node, source) {
+  return extractReturnTypeByField(node, source, { field: "return_type" });
 }
 
 function getFunctionType(node) {

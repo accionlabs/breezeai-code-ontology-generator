@@ -2,7 +2,7 @@ const Parser = require("tree-sitter");
 const Go = require("tree-sitter-go");
 const fs = require("fs");
 const path = require("path");
-const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getStatementTextLimit } = require("../utils");
+const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getStatementTextLimit, extractReturnTypeByField } = require("../utils");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(Go);
@@ -55,6 +55,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
 
   const name = getFunctionName(node, source);
   const params = extractFunctionParams(node, source);
+  const returnType = extractReturnType(node, source);
   const calls = extractDirectCalls(node, source);
 
   const { visibility, kind, receiver } = getFunctionModifiers(node, source);
@@ -68,6 +69,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
     kind,
     receiver,
     params,
+    returnType,
     startLine,
     endLine,
     calls,
@@ -79,6 +81,13 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
   }
 
   return result;
+}
+
+// Go return type lives in the `result` field, which may be a single type
+// (`int`) or a parameter_list for multiple/named returns (`(int, error)`).
+// Captured as a composite string; null when the function returns nothing.
+function extractReturnType(node, source) {
+  return extractReturnTypeByField(node, source, { field: "result" });
 }
 
 function getFunctionModifiers(node, source) {

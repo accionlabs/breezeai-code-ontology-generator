@@ -107,6 +107,9 @@ function extractFunctionInfo(
 
   const statements = captureStatements ? extractStatements(node, source) : [];
 
+  // returnType: N/A for Perl. Perl is dynamically typed and declares no return
+  // type in subroutine signatures, so there is nothing to extract (see
+  // BREEZEAI-698). The closest signature metadata we have is `prototype`.
   const result = {
     name,
     type: node.type,
