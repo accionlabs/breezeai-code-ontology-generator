@@ -27,7 +27,8 @@ function withTempFile(name, content, fn) {
   }
 }
 
-const find = (routes, p) => routes.find((r) => r.path === p);
+const find = (routes, p, method) =>
+  routes.find((r) => r.path === p && (method === undefined || r.method === method));
 
 // --------------------------------------------------------------- Express ----
 withTempFile("server.js", `
@@ -157,6 +158,63 @@ export default class UserController {
     find(r, "/users/login").handler === "login" && find(r, "/users/login").scope === "function");
   check("custom fw: @Query NOT treated as route without @nestjs import",
     !r.some((x) => x.kind === "graphql"));
+});
+
+// ----------------------------------------------- LoopBack 4 (decorators) ----
+// Lowercase verb decorators from @loopback/rest, full path in 1st arg (no
+// class base), @del -> DELETE, config-prefix concat -> {token}, plain classes.
+withTempFile("roles.controller.ts", `
+import {get, post, put, patch, del, requestBody} from '@loopback/rest';
+import appConfig from '../config/app.config';
+
+export class RolesController {
+  constructor() {}
+
+  @post(appConfig.apiPath + '/roles', { responses: {} })
+  async create(@requestBody() r) { return r; }
+
+  @get(appConfig.apiPath + '/roles/count', { responses: {} })
+  async count() { return 0; }
+
+  @get(\`\${appConfig.apiPathV2}/roles\`, { responses: {} })
+  async find() { return []; }
+
+  @patch('/roles/{id}', { responses: {} })
+  async update() {}
+
+  @put('/roles/{id}', { responses: {} })
+  async replace() {}
+
+  @del('/roles/{id}', { responses: {} })
+  async remove() {}
+}
+`, (file) => {
+  const r = tsRoutes(file);
+  check("loopback: 6 routes", r.length === 6);
+  check("loopback: framework loopback", r.every((x) => x.framework === "loopback"));
+  check("loopback: function-scoped + handler captured",
+    r.every((x) => x.scope === "function" && x.handler));
+  check("loopback: @del -> DELETE", find(r, "/roles/{id}", "DELETE") != null);
+  check("loopback: @patch + @put + @del share path",
+    r.filter((x) => x.path === "/roles/{id}").length === 3);
+  check("loopback: config-prefix concat -> {apiPath} token",
+    find(r, "{apiPath}/roles", "POST") != null);
+  check("loopback: count path", find(r, "{apiPath}/roles/count", "GET") != null);
+  check("loopback: template literal prefix -> {apiPathV2} token",
+    find(r, "{apiPathV2}/roles", "GET") != null);
+  check("loopback: decorator name recorded", r.every((x) => /^@(get|post|put|patch|del)$/.test(x.decorator)));
+});
+
+// No @loopback/rest import -> lowercase @get must NOT be treated as a route
+// (avoids misreading custom/local decorators of the same name).
+withTempFile("not-loopback.controller.ts", `
+import {get} from './my-decorators';
+export class Thing {
+  @get('/thing')
+  async list() { return []; }
+}
+`, (file) => {
+  check("loopback: no @loopback/rest import -> not detected", tsRoutes(file).length === 0);
 });
 
 // ----------------------------------------------- Vue Router (frontend) ------
