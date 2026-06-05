@@ -17,10 +17,15 @@
  *     @Query/@Mutation/@Subscription/@ResolveField   -> routeKind "graphql"
  *     @SubscribeMessage('event')                      -> routeKind "ws"
  *     @MessagePattern/@EventPattern(pattern)          -> routeKind "message"
+ *   LoopBack 4 (decorator-based, attached to handler method):
+ *     @get/@post/@put/@patch/@del('/full/path', {spec})   (@del -> DELETE)
+ *     full path is the 1st decorator arg (no class-level base, unlike Nest);
+ *     config-prefix concatenation (appConfig.apiPath + '/x') -> {apiPath}/x
  *
  * Call-based detection is gated on an express/fastify/koa import and a route-like
- * path ('/...') to avoid false positives (e.g. cache.get('key')); decorator
- * detection is gated on a @nestjs/* import.
+ * path ('/...') to avoid false positives (e.g. cache.get('key')); NestJS decorator
+ * detection is gated on a @nestjs/* import (or a @Controller class); LoopBack
+ * decorator detection is gated on a @loopback/rest import.
  */
 
 const MAX_TEXT = 500;
@@ -111,6 +116,7 @@ function detectImports(root, source) {
     fastify: has(/^fastify$/),
     koa: has(/^koa($|-router)|^@koa\/router$/),
     nest: has(/^@nestjs\//),
+    loopback: has(/^@loopback\/rest$/),
     vueRouter: has(/^vue-router$/),
   };
 }
@@ -436,6 +442,98 @@ function extractDecoratorRoutes(root, source, fw) {
 }
 
 // -------------------------------------------------------------------
+// LoopBack 4 — decorator-based routes
+//
+// Lowercase verb decorators imported from @loopback/rest. Unlike NestJS the
+// full path lives in each method decorator's first argument (there is no
+// class-level base path), and DELETE is spelled @del. The path argument is
+// frequently a string concatenation of a config-prefix constant and a literal
+// (appConfig.apiPath + '/roles'); the constant resolves cross-file, so it is
+// emitted as an unresolved {token} (e.g. {apiPath}/roles) — same convention
+// the graph already uses for version tokens.
+// -------------------------------------------------------------------
+const LOOPBACK_HTTP_DECORATORS = {
+  get: "GET", post: "POST", put: "PUT", patch: "PATCH", del: "DELETE",
+};
+
+// Build a path string from a decorator's first argument: string/template
+// literals as-is, `a + b` concatenations joined, and identifier / member
+// operands (prefix constants like appConfig.apiPath) rendered as {token}.
+function loopbackPathExpr(source, node) {
+  if (!node) return null;
+  // Template literal: render ${appConfig.apiPathV2} as {apiPathV2} (vs getString's
+  // generic {param}) so the prefix token matches the concatenation form.
+  if (node.type === "template_string") {
+    let out = "";
+    for (let i = 0; i < node.childCount; i++) {
+      const c = node.child(i);
+      if (c.type === "string_fragment") out += text(source, c);
+      else if (c.type === "template_substitution") {
+        const r = loopbackPathExpr(source, c.namedChild(0));
+        out += r != null ? r : "{param}";
+      }
+    }
+    return out;
+  }
+  const s = getString(source, node);
+  if (s != null) return s;
+  if (node.type === "binary_expression") {
+    const l = loopbackPathExpr(source, node.childForFieldName("left"));
+    const r = loopbackPathExpr(source, node.childForFieldName("right"));
+    if (l == null && r == null) return null;
+    return (l || "") + (r || "");
+  }
+  if (node.type === "member_expression") {
+    const prop = memberProperty(source, node); // appConfig.apiPath -> {apiPath}
+    return prop ? `{${prop}}` : null;
+  }
+  if (node.type === "identifier") {
+    return `{${text(source, node)}}`;
+  }
+  if (node.type === "parenthesized_expression") {
+    return loopbackPathExpr(source, node.namedChild(0));
+  }
+  return null;
+}
+
+function loopbackMethodRoutes(source, methodNode, framework) {
+  const decs = decoratorsOf(methodNode);
+  if (!decs.length) return [];
+  const handler = methodName(source, methodNode);
+  const handlerLine = methodNode.startPosition.row + 1;
+  const routes = [];
+  for (const dec of decs) {
+    const { name, argsNode } = decoratorInfo(source, dec);
+    if (!name || !LOOPBACK_HTTP_DECORATORS[name]) continue;
+    const argPath = loopbackPathExpr(source, firstArgOf(argsNode));
+    if (argPath == null) continue;
+    const li = { startLine: dec.startPosition.row + 1, endLine: dec.endPosition.row + 1 };
+    routes.push(makeRoute({
+      framework, method: LOOPBACK_HTTP_DECORATORS[name],
+      path: argPath, kind: "route",
+      handler, handlerLine, scope: "function",
+      decorator: `@${name}`, text: text(source, dec), ...li,
+    }));
+  }
+  return routes;
+}
+
+// LoopBack controllers carry no @Controller decorator and no @nestjs import,
+// so they need their own gate: the @loopback/rest import. Every class in such
+// a file is treated as a controller (LoopBack controllers are plain classes).
+function extractLoopbackRoutes(root, source, fw) {
+  const routes = [];
+  if (!fw.loopback) return routes;
+  traverse(root, (node) => {
+    if (node.type !== "class_declaration" && node.type !== "class") return;
+    for (const m of classMethods(node)) {
+      routes.push(...loopbackMethodRoutes(source, m, "loopback"));
+    }
+  });
+  return routes;
+}
+
+// -------------------------------------------------------------------
 // Vue Router (frontend): routes: [{ path, component, children }]
 // Page-routes (path -> component), no HTTP method. Tagged method "VIEW",
 // kind "page", framework "vue-router". Nested children are path-composed.
@@ -527,6 +625,7 @@ function extractRoutesFromTree(source, tree) {
   const routes = [
     ...extractCallRoutes(root, source, fw),
     ...extractDecoratorRoutes(root, source, fw),
+    ...extractLoopbackRoutes(root, source, fw),
     ...extractVueRouterRoutes(root, source, fw),
   ];
   routes.sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
