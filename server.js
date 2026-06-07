@@ -871,7 +871,7 @@ app.post("/api/analyze-sql", sqlUpload.single("file"), async (req, res) => {
 // Keep this cap in sync with the backend's `/db-ontology/stream-ingest`
 // controller (maxCount in fileUplaodOptions). Multi-index ES dumps can
 // span 100+ files (mapping + settings per index).
-app.post("/api/analyze-es", esUpload.array("file", 200), async (req, res) => {
+app.post("/api/analyze-es", esUpload.array("file", 500), async (req, res) => {
   const t0 = Date.now();
   try {
     const { projectUuid, dataLakeId, repositoryName } = req.body || {};
