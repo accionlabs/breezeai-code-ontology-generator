@@ -188,24 +188,19 @@ function extractParamDecorators(node, source) {
     for (let j = 0; j < child.childCount; j++) {
       const d = child.child(j);
       if (d.type === "call_expression") {
+        // Full callee text so namespaced decorators keep their qualifier
+        // (LoopBack @param.path.string -> "param.path.string", not "string").
+        // NestJS @Param/@Body/@Query are single identifiers, so unaffected.
         const fn = d.childForFieldName("function");
-        if (fn && fn.type === "member_expression") {
-          const prop = fn.childForFieldName("property");
-          name = prop ? source.slice(prop.startIndex, prop.endIndex) : null;
-        } else if (fn) {
-          name = source.slice(fn.startIndex, fn.endIndex);
-        }
+        if (fn) name = source.slice(fn.startIndex, fn.endIndex);
         const argsNode = d.childForFieldName("arguments");
         if (argsNode) {
           for (let k = 0; k < argsNode.namedChildCount; k++) {
             args.push(decoratorArgValue(argsNode.namedChild(k), source));
           }
         }
-      } else if (d.type === "identifier") {
+      } else if (d.type === "identifier" || d.type === "member_expression") {
         name = source.slice(d.startIndex, d.endIndex);
-      } else if (d.type === "member_expression") {
-        const prop = d.childForFieldName("property");
-        name = prop ? source.slice(prop.startIndex, prop.endIndex) : null;
       }
     }
     if (name) decorators.push({ name, args });
