@@ -3,7 +3,7 @@ const TS = require("tree-sitter-typescript").typescript;
 const fs = require("fs");
 const path = require("path");
 const { parseSource } = require("../utils");
-const { collectQueryStatements } = require("./extract-functions-typescript");
+const { collectQueryStatements, collectApiStatements } = require("./extract-functions-typescript");
 
 const sharedParser = new Parser();
 sharedParser.setLanguage(TS);
@@ -48,6 +48,10 @@ function extractClassStatements(node, source) {
   // Scan class body for query statements (SQL, Cypher, etc.)
   // so that class-level constants and property initializers are captured.
   collectQueryStatements(node, source, statements);
+
+  // Scan class body for API calls (axios, fetch, etc.) in property
+  // initializers or static blocks that live outside any method.
+  collectApiStatements(node, source, statements);
 
   return statements;
 }

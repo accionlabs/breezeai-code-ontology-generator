@@ -542,6 +542,11 @@ function extractFileStatements(filePath) {
   // ensures no duplicate nodes.
   collectQueryStatements(tree.rootNode, source, statements);
 
+  // Detect API calls (axios, fetch, etc.) at file scope — e.g. a top-level
+  // axios.get('/x') outside any function. Dedup by line range against
+  // function-scoped captures.
+  collectApiStatements(tree.rootNode, source, statements);
+
   return statements;
 }
 

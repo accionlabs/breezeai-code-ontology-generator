@@ -47,7 +47,9 @@ function extractClassStatements(node, source) {
   for (let i = 0; i < body.namedChildCount; i++) {
     const child = body.namedChild(i);
     if (!CLASS_STATEMENT_TYPES.includes(child.type)) continue;
-    const nameNode = child.childForFieldName("name");
+    // JS `field_definition` holds its name under the `property` field
+    // (the TS grammar's `public_field_definition` uses `name`).
+    const nameNode = child.childForFieldName("name") || child.childForFieldName("property");
     statements.push({
       type: child.type,
       name: nameNode ? nameNode.text : null,
@@ -60,6 +62,10 @@ function extractClassStatements(node, source) {
   // Scan class body for query statements (SQL, Cypher, etc.)
   // so that class-level constants and property initializers are captured.
   collectQueryStatements(node, source, statements);
+
+  // Scan class body for API calls (axios, fetch, etc.) in field initializers
+  // or static blocks that live outside any method.
+  collectApiStatements(node, source, statements);
 
   return statements;
 }
