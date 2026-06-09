@@ -7,7 +7,7 @@ const { truncateSourceCode, parseSource, containsDbQuery, getDbFromMethod, getAp
 const sharedParser = new Parser();
 sharedParser.setLanguage(JavaScript);
 
-const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition", "return_statement"];
+const STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "field_definition", "return_statement"];
 
 function extractFunctionsWithCalls(filePath, repoPath = null, captureSourceCode = false, captureStatements = false) {
   const { source, tree } = parseSource(filePath, sharedParser);

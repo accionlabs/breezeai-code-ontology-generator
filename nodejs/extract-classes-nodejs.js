@@ -37,7 +37,7 @@ function extractClasses(filePath, repoPath = null, captureStatements = false) {
   return classes;
 }
 
-const CLASS_STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "public_field_definition"];
+const CLASS_STATEMENT_TYPES = ["lexical_declaration", "variable_declaration", "field_definition"];
 
 function extractClassStatements(node, source) {
   const body = node.childForFieldName("body");
