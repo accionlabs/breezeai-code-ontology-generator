@@ -248,4 +248,47 @@ withTempFile("not-router.ts", `const routes = [{ path: '/x', component: Foo }]`,
   check("vue-router: no vue-router import -> not detected", tsRoutes(file).length === 0);
 });
 
+// ------------------------------------- NestJS route enrichment (BREEZEAI-690) ----
+// @Controller base + @Version + @UseGuards + @Body/@ApiResponse compose into a
+// fully-derived, searchable route. @ApiResponse({ example }) is the oracle.
+withTempFile("role-status.controller.ts", `
+import { Controller, Get, Post, Version, UseGuards, Param, Body } from '@nestjs/common';
+import { ApiResponse } from '@nestjs/swagger';
+
+@Controller('role-status')
+export class RoleStatusController {
+  @Version('1')
+  @UseGuards(JwtAuthGuard)
+  @Get(':id')
+  @ApiResponse({ type: RoleStatusDto, example: { path: '/role-status/1', method: 'GET' } })
+  async detail(@Param('id') id: number) { return id; }
+
+  @Post()
+  async addProject(@Body() dto: AddProjectDto) { return dto; }
+}
+`, (file) => {
+  const r = tsRoutes(file);
+  const detail = r.find((x) => x.handler === "detail");
+  const add = r.find((x) => x.handler === "addProject");
+
+  // AC1 — class base path recovered
+  check("nest690: controllerBase recovered", detail.controllerBase === "role-status");
+  // AC2 — method decorators bound + full route derived
+  check("nest690: version composed into path", detail.path === "/v1/role-status/:id");
+  check("nest690: version field", detail.version === "1");
+  check("nest690: authRequired from @UseGuards", detail.authRequired === true);
+  check("nest690: guards captured", detail.guards.length === 1 && detail.guards[0] === "JwtAuthGuard");
+  check("nest690: route function-scoped w/ handler", detail.scope === "function" && detail.handler === "detail");
+  // AC3/AC4 — DTOs
+  check("nest690: requestDTO from @Body", add.requestDTO === "AddProjectDto");
+  check("nest690: responseDTO from @ApiResponse type", detail.responseDTO === "RoleStatusDto");
+  // AC4 — oracle: @ApiResponse example { path:'/role-status/1', method:'GET' }
+  const oracle = { path: "/role-status/1", method: "GET" };
+  check("nest690: oracle method matches", detail.method === oracle.method);
+  check("nest690: oracle path shape matches (base+param)", detail.path.includes("role-status/:id"));
+  // non-versioned route still recovers base + DTO
+  check("nest690: POST base path", add.path === "role-status" && add.method === "POST");
+  check("nest690: POST inherits no guard", add.authRequired === false);
+});
+
 console.log(`\n✅ All ${passed} assertions passed.`);
