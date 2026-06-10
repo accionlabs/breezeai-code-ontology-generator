@@ -621,7 +621,7 @@ function loopbackPathExpr(source, node) {
   return null;
 }
 
-function loopbackMethodRoutes(source, methodNode, framework) {
+function loopbackMethodRoutes(source, methodNode, framework, base = null) {
   const decs = decoratorsOf(methodNode);
   if (!decs.length) return [];
   const handler = methodName(source, methodNode);
@@ -632,15 +632,32 @@ function loopbackMethodRoutes(source, methodNode, framework) {
     if (!name || !LOOPBACK_HTTP_DECORATORS[name]) continue;
     const argPath = loopbackPathExpr(source, firstArgOf(argsNode));
     if (argPath == null) continue;
+    // Compose the class-level @api({ basePath }) prefix. Guard against a method
+    // that already carries the full path (avoids /orders/orders/{id}).
+    const composedPath = base && !argPath.startsWith(base) ? joinPaths(base, argPath) : argPath;
     const li = { startLine: dec.startPosition.row + 1, endLine: dec.endPosition.row + 1 };
     routes.push(makeRoute({
       framework, method: LOOPBACK_HTTP_DECORATORS[name],
-      path: argPath, kind: "route",
+      path: composedPath, kind: "route",
       handler, handlerLine, scope: "function",
+      controllerBase: base || null,
       decorator: `@${name}`, text: text(source, dec), ...li,
     }));
   }
   return routes;
+}
+
+// Class-level @api({ basePath: '/x' }) — LoopBack's only class base path. Most
+// controllers omit it (full path lives per method), so this is usually null.
+function loopbackApiBase(source, classNode) {
+  for (const dec of decoratorsOf(classNode)) {
+    const { name, argsNode } = decoratorInfo(source, dec);
+    if (name === "api") {
+      const base = objectStringProp(source, firstObjectArg(argsNode), "basePath");
+      if (base != null) return base;
+    }
+  }
+  return null;
 }
 
 // LoopBack controllers carry no @Controller decorator and no @nestjs import,
@@ -651,8 +668,9 @@ function extractLoopbackRoutes(root, source, fw) {
   if (!fw.loopback) return routes;
   traverse(root, (node) => {
     if (node.type !== "class_declaration" && node.type !== "class") return;
+    const base = loopbackApiBase(source, node);
     for (const m of classMethods(node)) {
-      routes.push(...loopbackMethodRoutes(source, m, "loopback"));
+      routes.push(...loopbackMethodRoutes(source, m, "loopback", base));
     }
   });
   return routes;

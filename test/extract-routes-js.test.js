@@ -217,6 +217,33 @@ export class Thing {
   check("loopback: no @loopback/rest import -> not detected", tsRoutes(file).length === 0);
 });
 
+// ----------------------------------- LoopBack @api({ basePath }) class base ----
+// @api is LoopBack's only class-level base path; relative method paths compose
+// onto it, and controllerBase is recovered. A method already carrying the full
+// path must NOT be double-prefixed.
+withTempFile("api-base.controller.ts", `
+import { api, get, post } from '@loopback/rest';
+@api({ basePath: '/orders', paths: {} })
+export class OrderController {
+  @get('/{id}')
+  async findById() { return {}; }
+  @post('/batch')
+  async createBatch() { return {}; }
+  @get('/orders/{id}/items')
+  async items() { return []; }
+}
+`, (file) => {
+  const r = tsRoutes(file);
+  check("loopback @api: 3 routes", r.length === 3);
+  check("loopback @api: controllerBase recovered on every route",
+    r.every((x) => x.controllerBase === "/orders"));
+  check("loopback @api: relative path composed", find(r, "/orders/{id}", "GET") != null);
+  check("loopback @api: relative root path composed", find(r, "/orders/batch", "POST") != null);
+  check("loopback @api: full path not double-prefixed",
+    find(r, "/orders/{id}/items", "GET") != null &&
+    !r.some((x) => x.path.includes("/orders/orders")));
+});
+
 // ----------------------------------------------- Vue Router (frontend) ------
 // Page-routes (path -> component), nested children composed, lazy imports.
 withTempFile("router.ts", `
