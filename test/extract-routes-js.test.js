@@ -197,11 +197,11 @@ export class RolesController {
   check("loopback: @del -> DELETE", find(r, "/roles/{id}", "DELETE") != null);
   check("loopback: @patch + @put + @del share path",
     r.filter((x) => x.path === "/roles/{id}").length === 3);
-  check("loopback: config-prefix concat -> {apiPath} token",
-    find(r, "{apiPath}/roles", "POST") != null);
-  check("loopback: count path", find(r, "{apiPath}/roles/count", "GET") != null);
-  check("loopback: template literal prefix -> {apiPathV2} token",
-    find(r, "{apiPathV2}/roles", "GET") != null);
+  check("loopback: config-prefix concat -> {appConfig.apiPath} token (full reference)",
+    find(r, "{appConfig.apiPath}/roles", "POST") != null);
+  check("loopback: count path", find(r, "{appConfig.apiPath}/roles/count", "GET") != null);
+  check("loopback: template literal prefix -> {appConfig.apiPathV2} token (full reference)",
+    find(r, "{appConfig.apiPathV2}/roles", "GET") != null);
   check("loopback: decorator name recorded", r.every((x) => /^@(get|post|put|patch|del)$/.test(x.decorator)));
 });
 

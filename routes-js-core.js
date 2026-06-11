@@ -609,8 +609,9 @@ function loopbackPathExpr(source, node) {
     return (l || "") + (r || "");
   }
   if (node.type === "member_expression") {
-    const prop = memberProperty(source, node); // appConfig.apiPath -> {apiPath}
-    return prop ? `{${prop}}` : null;
+    // Keep the full reference so a graph consumer can resolve/disambiguate it:
+    // appConfig.apiPath -> {appConfig.apiPath} (not the bare leaf {apiPath}).
+    return `{${text(source, node)}}`;
   }
   if (node.type === "identifier") {
     return `{${text(source, node)}}`;
