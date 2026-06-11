@@ -105,37 +105,53 @@ function stringLiteralValue(node, source) {
   return out;
 }
 
-// Resolve a value node to a string: handles string_literal and the first
-// element of a {"a","b"} array initializer.
-function valueToString(node, source) {
-  if (!node) return null;
-  if (node.type === "string_literal") return stringLiteralValue(node, source);
-  if (node.type === "element_value_array_initializer") {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const s = stringLiteralValue(node.namedChild(i), source);
-      if (s != null) return s;
-    }
-  }
-  return null;
+// Spring property placeholders ${...} and SpEL #{...} -> {...} token form.
+function tokenizePath(s) {
+  return s.replace(/[$#]\{([^}]*)\}/g, "{$1}");
 }
 
-// Resolve a value node to all literal strings: a single string_literal -> one
-// element; a {"a","b"} array initializer -> one element per literal.
-function valueToStringList(node, source) {
-  if (!node) return [];
-  if (node.type === "string_literal") {
-    const s = stringLiteralValue(node, source);
-    return s != null ? [s] : [];
+// Resolve a single annotation value node to a path string. Literals are taken
+// verbatim (with ${x}/#{x} placeholders rewritten to {x}); unresolved
+// constants / field accesses are rendered as {lastSegment}; string
+// concatenation joins its tokenized operands. Returns null when nothing usable.
+function resolvePath(node, source) {
+  if (!node) return null;
+  switch (node.type) {
+    case "string_literal": {
+      const s = stringLiteralValue(node, source);
+      return s != null ? tokenizePath(s) : null;
+    }
+    case "identifier":
+    case "field_access":
+    case "scoped_identifier": {
+      const txt = slice(source, node) || "";
+      const seg = txt.slice(txt.lastIndexOf(".") + 1).trim();
+      return seg ? `{${seg}}` : null;
+    }
+    case "binary_expression": {
+      // String concatenation (a + b + ...) -> join tokenized operands.
+      const l = resolvePath(node.childForFieldName("left"), source) || "";
+      const r = resolvePath(node.childForFieldName("right"), source) || "";
+      return (l + r) || null;
+    }
+    default:
+      return null;
   }
+}
+
+// Resolve a value node to all path strings: a {"a","b"} array -> one per
+// element; any other node -> a single resolved path (tokenized if non-literal).
+function pathValuesFrom(node, source) {
+  if (!node) return [];
   if (node.type === "element_value_array_initializer") {
     const out = [];
     for (let i = 0; i < node.namedChildCount; i++) {
-      const s = stringLiteralValue(node.namedChild(i), source);
-      if (s != null) out.push(s);
+      out.push(...pathValuesFrom(node.namedChild(i), source));
     }
     return out;
   }
-  return [];
+  const v = resolvePath(node, source);
+  return v != null ? [v] : [];
 }
 
 function getNamedArg(argList, name, source) {
@@ -152,39 +168,31 @@ function getNamedArg(argList, name, source) {
   return null;
 }
 
-// Path declared by an annotation: positional string, or value=/path= attribute.
+// Single path declared by an annotation (first of any multi-path set), or null.
+// Used for class base paths and JAX-RS @Path (single-valued by design).
 function annotationPath(ann, source) {
-  const args = getArgList(ann);
-  if (!args) return null;
-
-  // Positional string or array (no `name=`).
-  for (let i = 0; i < args.namedChildCount; i++) {
-    const c = args.namedChild(i);
-    if (c.type === "string_literal" || c.type === "element_value_array_initializer") {
-      return valueToString(c, source);
-    }
-  }
-  // Named value= / path=
-  const v = getNamedArg(args, "value", source) || getNamedArg(args, "path", source);
-  return v ? valueToString(v, source) : null;
+  const paths = annotationPaths(ann, source);
+  return paths.length ? paths[0] : null;
 }
 
-// All paths declared by an annotation (multi-path arrays -> one per element).
-// Returns [null] when no literal path is present, so callers emit exactly one
-// route bearing the base path (e.g. @PostMapping with no args).
+// All paths declared by an annotation (multi-path arrays -> one per element;
+// non-literal constants/placeholders tokenized via resolvePath). Returns [null]
+// when no path is present, so callers emit exactly one route bearing the base
+// path (e.g. @PostMapping with no args).
 function annotationPaths(ann, source) {
   const args = getArgList(ann);
   if (!args) return [null];
 
+  // Positional value (string, array, or non-literal like a constant ref).
   for (let i = 0; i < args.namedChildCount; i++) {
     const c = args.namedChild(i);
-    if (c.type === "string_literal" || c.type === "element_value_array_initializer") {
-      const list = valueToStringList(c, source);
-      return list.length ? list : [null];
-    }
+    if (c.type === "element_value_pair") continue; // named args handled below
+    const list = pathValuesFrom(c, source);
+    if (list.length) return list;
   }
+  // Named value= / path=
   const v = getNamedArg(args, "value", source) || getNamedArg(args, "path", source);
-  const list = v ? valueToStringList(v, source) : [];
+  const list = v ? pathValuesFrom(v, source) : [];
   return list.length ? list : [null];
 }
 
