@@ -55,13 +55,13 @@ function countLinesOfCode(filePath) {
 // Language configuration
 const LANGUAGE_CONFIG = {
   typescript: {
-    extensions: ["**/*.ts", "**/*.tsx"],
+    extensions: ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"],
     name: "TypeScript",
     analyzer: analyzeTypeScriptRepo,
     priority: 1, // Higher priority means it's checked first
   },
   javascript: {
-    extensions: ["**/*.js", "**/*.jsx"],
+    extensions: ["**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs"],
     name: "JavaScript",
     analyzer: analyzeJavaScriptRepo,
   },

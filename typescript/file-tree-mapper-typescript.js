@@ -23,7 +23,7 @@ const { getIgnorePatternsWithPrefix } = require("../ignore-patterns");
 // -------------------------------------------------------------
 function getTsFilesOnly(repoPath, ignorePatterns = null) {
   const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'typescript' });
-  return glob.sync(`${repoPath}/**/*.{ts,tsx}`, {
+  return glob.sync(`${repoPath}/**/*.{ts,tsx,mts,cts}`, {
     ignore: patterns
   });
 }
@@ -33,7 +33,7 @@ function getTsFilesOnly(repoPath, ignorePatterns = null) {
 // -------------------------------------------------------------
 function getJsFilesOnly(repoPath, ignorePatterns = null) {
   const patterns = ignorePatterns || getIgnorePatternsWithPrefix(repoPath, { language: 'typescript' });
-  return glob.sync(`${repoPath}/**/*.{js,jsx}`, {
+  return glob.sync(`${repoPath}/**/*.{js,jsx,mjs,cjs}`, {
     ignore: patterns
   });
 }
@@ -144,7 +144,7 @@ function analyzeTypeScriptFiles(repoPath, pathAliases, opts = {}) {
         }
 
         // Try with different extensions
-        const extensions = ['.ts', '.tsx', '.js', '.jsx'];
+        const extensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
         for (const ext of extensions) {
           const pathWithExt = basePath + ext;
           if (fs.existsSync(pathWithExt)) {

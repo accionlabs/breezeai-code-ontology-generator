@@ -133,6 +133,12 @@ function makeRoute(fields) {
     kind: fields.kind || "route",
     isRegex: false,
     decorator: fields.decorator || null,
+    controllerBase: fields.controllerBase != null ? fields.controllerBase : null,
+    version: fields.version != null ? fields.version : null,
+    authRequired: fields.authRequired != null ? fields.authRequired : false,
+    guards: fields.guards || [],
+    requestDTO: fields.requestDTO != null ? fields.requestDTO : null,
+    responseDTO: fields.responseDTO != null ? fields.responseDTO : null,
     scope: fields.scope || "file",
     handlerLine: fields.handlerLine != null ? fields.handlerLine : null,
     text: (fields.text || `[${fields.framework}] ${method} ${endpoint}`).slice(0, MAX_TEXT),
@@ -348,6 +354,81 @@ function methodName(source, methodNode) {
   return n ? text(source, n) : null;
 }
 
+// Identifier / string arguments of a decorator: @UseGuards(JwtAuthGuard) -> ["JwtAuthGuard"].
+function decoratorIdentifierArgs(source, argsNode) {
+  const out = [];
+  if (!argsNode) return out;
+  for (let i = 0; i < argsNode.namedChildCount; i++) {
+    const a = argsNode.namedChild(i);
+    if (a.type === "identifier") out.push(text(source, a, 80));
+    else if (a.type === "member_expression") out.push(text(source, a, 80));
+    else {
+      const s = getString(source, a);
+      if (s != null) out.push(s);
+    }
+  }
+  return out;
+}
+
+// First object-literal argument of a decorator call (e.g. @ApiResponse({ type: Dto })).
+function firstObjectArg(argsNode) {
+  if (!argsNode) return null;
+  for (let i = 0; i < argsNode.namedChildCount; i++) {
+    if (argsNode.namedChild(i).type === "object") return argsNode.namedChild(i);
+  }
+  return null;
+}
+
+// Value of an object property as source text; arrays return their first element
+// (so `type: [Dto]` -> "Dto"). Used to pull responseDTO from @ApiResponse.
+function objectPropText(source, objNode, key) {
+  if (!objNode || objNode.type !== "object") return null;
+  for (let i = 0; i < objNode.namedChildCount; i++) {
+    const pair = objNode.namedChild(i);
+    if (pair.type !== "pair") continue;
+    const k = pair.childForFieldName("key");
+    if (k && text(source, k).replace(/['"]/g, "") === key) {
+      const v = pair.childForFieldName("value");
+      if (!v) return null;
+      if (v.type === "array") {
+        const e = v.namedChild(0);
+        return e ? text(source, e, 80) : null;
+      }
+      return text(source, v, 80);
+    }
+  }
+  return null;
+}
+
+// formal_parameters node of a method_definition.
+function methodParamsNode(methodNode) {
+  for (let i = 0; i < methodNode.childCount; i++) {
+    if (methodNode.child(i).type === "formal_parameters") return methodNode.child(i);
+  }
+  return null;
+}
+
+// Type of the parameter decorated with @Body -> requestDTO ("AddProjectDto").
+function bodyParamType(source, methodNode) {
+  const params = methodParamsNode(methodNode);
+  if (!params) return null;
+  for (let i = 0; i < params.namedChildCount; i++) {
+    const p = params.namedChild(i);
+    if (p.type !== "required_parameter" && p.type !== "optional_parameter") continue;
+    let hasBody = false;
+    for (let j = 0; j < p.childCount; j++) {
+      if (p.child(j).type !== "decorator") continue;
+      const { name } = decoratorInfo(source, p.child(j));
+      if (name === "Body") hasBody = true;
+    }
+    if (hasBody) {
+      const typeNode = p.childForFieldName("type");
+      if (typeNode) return text(source, typeNode, 80).replace(/^:\s*/, "").trim();
+    }
+  }
+  return null;
+}
+
 function classMethods(classNode) {
   const body = classNode.childForFieldName("body");
   const out = [];
@@ -358,14 +439,38 @@ function classMethods(classNode) {
   return out;
 }
 
-function nestMethodRoutes(source, methodNode, controllerBase, opts) {
+function nestMethodRoutes(source, methodNode, ctrl, opts) {
   const decs = decoratorsOf(methodNode);
   if (!decs.length) return [];
   const framework = opts.framework;
   const allowPatterns = opts.allowPatterns; // GraphQL/WS/message need a real @nestjs import
   const handler = methodName(source, methodNode);
   const handlerLine = methodNode.startPosition.row + 1;
+  const controllerBase = ctrl.base;
   const routes = [];
+
+  // Method-level metadata: @Version overrides the controller's; @UseGuards
+  // merges with the controller's; @ApiResponse({ type }) -> responseDTO;
+  // the @Body-decorated parameter's type -> requestDTO.
+  let methodVersion = null;
+  const methodGuards = [];
+  let responseDTO = null;
+  for (const dec of decs) {
+    const { name, argsNode } = decoratorInfo(source, dec);
+    if (name === "Version") {
+      const v = decoratorPath(source, argsNode);
+      if (v != null) methodVersion = v;
+    } else if (name === "UseGuards") {
+      methodGuards.push(...decoratorIdentifierArgs(source, argsNode));
+    } else if (name === "ApiResponse" || name === "ApiOkResponse" || name === "ApiCreatedResponse") {
+      const t = objectPropText(source, firstObjectArg(argsNode), "type");
+      if (t && !responseDTO) responseDTO = t.replace(/['"]/g, "");
+    }
+  }
+  const version = methodVersion != null ? methodVersion : ctrl.version;
+  const guards = [...ctrl.guards, ...methodGuards];
+  const authRequired = guards.length > 0;
+  const requestDTO = bodyParamType(source, methodNode);
 
   for (const dec of decs) {
     const { name, argsNode } = decoratorInfo(source, dec);
@@ -374,10 +479,15 @@ function nestMethodRoutes(source, methodNode, controllerBase, opts) {
     const argPath = decoratorPath(source, argsNode);
 
     if (NEST_HTTP_DECORATORS[name]) {
+      let composedPath = joinPaths(controllerBase, argPath);
+      if (version != null && version !== "") composedPath = joinPaths("/v" + version, composedPath);
       routes.push(makeRoute({
         framework, method: NEST_HTTP_DECORATORS[name],
-        path: joinPaths(controllerBase, argPath), kind: "route",
+        path: composedPath, kind: "route",
         handler, handlerLine, scope: "function",
+        controllerBase: controllerBase || null,
+        version: version != null ? version : null,
+        authRequired, guards, requestDTO, responseDTO,
         decorator: `@${name}`, text: text(source, dec), ...li,
       }));
     } else if (allowPatterns && NEST_GRAPHQL_DECORATORS[name]) {
@@ -412,11 +522,26 @@ function firstArgOf(argsNode) {
 
 // @Controller('base') | @Controller({ path: 'base' }) -> { has, base }
 function controllerInfo(source, classNode) {
+  let has = false;
+  let base = "";
+  let version = null;
+  const guards = [];
   for (const dec of decoratorsOf(classNode)) {
     const { name, argsNode } = decoratorInfo(source, dec);
-    if (name === "Controller") return { has: true, base: decoratorPath(source, argsNode) || "" };
+    if (name === "Controller") {
+      has = true;
+      base = decoratorPath(source, argsNode) || "";
+      // @Controller({ path, version }) — recover version if declared here.
+      const v = objectPropText(source, firstObjectArg(argsNode), "version");
+      if (v != null) version = v.replace(/['"]/g, "");
+    } else if (name === "Version") {
+      const v = decoratorPath(source, argsNode);
+      if (v != null) version = v;
+    } else if (name === "UseGuards") {
+      guards.push(...decoratorIdentifierArgs(source, argsNode));
+    }
   }
-  return { has: false, base: "" };
+  return { has, base, version, guards };
 }
 
 // Decorator routes fire when the file imports @nestjs/* OR a class carries a
@@ -435,7 +560,7 @@ function extractDecoratorRoutes(root, source, fw) {
       allowPatterns: fw.nest,
     };
     for (const m of classMethods(node)) {
-      routes.push(...nestMethodRoutes(source, m, ctrl.base, opts));
+      routes.push(...nestMethodRoutes(source, m, ctrl, opts));
     }
   });
   return routes;
@@ -484,8 +609,9 @@ function loopbackPathExpr(source, node) {
     return (l || "") + (r || "");
   }
   if (node.type === "member_expression") {
-    const prop = memberProperty(source, node); // appConfig.apiPath -> {apiPath}
-    return prop ? `{${prop}}` : null;
+    // Keep the full reference so a graph consumer can resolve/disambiguate it:
+    // appConfig.apiPath -> {appConfig.apiPath} (not the bare leaf {apiPath}).
+    return `{${text(source, node)}}`;
   }
   if (node.type === "identifier") {
     return `{${text(source, node)}}`;
@@ -496,7 +622,7 @@ function loopbackPathExpr(source, node) {
   return null;
 }
 
-function loopbackMethodRoutes(source, methodNode, framework) {
+function loopbackMethodRoutes(source, methodNode, framework, base = null) {
   const decs = decoratorsOf(methodNode);
   if (!decs.length) return [];
   const handler = methodName(source, methodNode);
@@ -507,15 +633,32 @@ function loopbackMethodRoutes(source, methodNode, framework) {
     if (!name || !LOOPBACK_HTTP_DECORATORS[name]) continue;
     const argPath = loopbackPathExpr(source, firstArgOf(argsNode));
     if (argPath == null) continue;
+    // Compose the class-level @api({ basePath }) prefix. Guard against a method
+    // that already carries the full path (avoids /orders/orders/{id}).
+    const composedPath = base && !argPath.startsWith(base) ? joinPaths(base, argPath) : argPath;
     const li = { startLine: dec.startPosition.row + 1, endLine: dec.endPosition.row + 1 };
     routes.push(makeRoute({
       framework, method: LOOPBACK_HTTP_DECORATORS[name],
-      path: argPath, kind: "route",
+      path: composedPath, kind: "route",
       handler, handlerLine, scope: "function",
+      controllerBase: base || null,
       decorator: `@${name}`, text: text(source, dec), ...li,
     }));
   }
   return routes;
+}
+
+// Class-level @api({ basePath: '/x' }) — LoopBack's only class base path. Most
+// controllers omit it (full path lives per method), so this is usually null.
+function loopbackApiBase(source, classNode) {
+  for (const dec of decoratorsOf(classNode)) {
+    const { name, argsNode } = decoratorInfo(source, dec);
+    if (name === "api") {
+      const base = objectStringProp(source, firstObjectArg(argsNode), "basePath");
+      if (base != null) return base;
+    }
+  }
+  return null;
 }
 
 // LoopBack controllers carry no @Controller decorator and no @nestjs import,
@@ -526,8 +669,9 @@ function extractLoopbackRoutes(root, source, fw) {
   if (!fw.loopback) return routes;
   traverse(root, (node) => {
     if (node.type !== "class_declaration" && node.type !== "class") return;
+    const base = loopbackApiBase(source, node);
     for (const m of classMethods(node)) {
-      routes.push(...loopbackMethodRoutes(source, m, "loopback"));
+      routes.push(...loopbackMethodRoutes(source, m, "loopback", base));
     }
   });
   return routes;

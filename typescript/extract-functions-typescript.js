@@ -164,6 +164,50 @@ function containsFunction(node) {
   return false;
 }
 
+// Unwrap a decorator argument to a plain value: string literals lose their
+// quotes ('id' -> id); anything else keeps its source text.
+function decoratorArgValue(node, source) {
+  if (!node) return null;
+  if (node.type === "string") {
+    return source.slice(node.startIndex, node.endIndex).replace(/^['"`]|['"`]$/g, "");
+  }
+  return source.slice(node.startIndex, node.endIndex);
+}
+
+// Capture parameter decorators (NestJS @Param/@Body/@Query, etc.) as
+// { name, args } pairs. Decorators are `decorator` children of the
+// required_parameter / optional_parameter node.
+function extractParamDecorators(node, source) {
+  const decorators = [];
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child.type !== "decorator") continue;
+
+    let name = null;
+    const args = [];
+    for (let j = 0; j < child.childCount; j++) {
+      const d = child.child(j);
+      if (d.type === "call_expression") {
+        // Full callee text so namespaced decorators keep their qualifier
+        // (LoopBack @param.path.string -> "param.path.string", not "string").
+        // NestJS @Param/@Body/@Query are single identifiers, so unaffected.
+        const fn = d.childForFieldName("function");
+        if (fn) name = source.slice(fn.startIndex, fn.endIndex);
+        const argsNode = d.childForFieldName("arguments");
+        if (argsNode) {
+          for (let k = 0; k < argsNode.namedChildCount; k++) {
+            args.push(decoratorArgValue(argsNode.namedChild(k), source));
+          }
+        }
+      } else if (d.type === "identifier" || d.type === "member_expression") {
+        name = source.slice(d.startIndex, d.endIndex);
+      }
+    }
+    if (name) decorators.push({ name, args });
+  }
+  return decorators;
+}
+
 function extractParamName(node, source) {
   switch (node.type) {
     case "required_parameter":
@@ -181,7 +225,11 @@ function extractParamName(node, source) {
           paramName = "[...]";
         }
       }
-      return paramName ? { name: paramName, type: paramType } : null;
+      if (!paramName) return null;
+      const decorators = extractParamDecorators(node, source);
+      const param = { name: paramName, type: paramType };
+      if (decorators.length) param.decorators = decorators;
+      return param;
     }
 
     case "identifier":
@@ -562,6 +610,11 @@ function extractFileStatements(filePath) {
   // line range in collectQueryStatements's seen set, and Neo4j MERGE
   // ensures no duplicate nodes.
   collectQueryStatements(tree.rootNode, source, statements);
+
+  // Detect API calls (axios, fetch, etc.) at file scope — e.g. a top-level
+  // axios.get('/x') outside any function. Dedup by line range against
+  // function-scoped captures.
+  collectApiStatements(tree.rootNode, source, statements);
 
   return statements;
 }

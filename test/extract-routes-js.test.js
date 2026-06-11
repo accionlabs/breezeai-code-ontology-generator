@@ -197,11 +197,11 @@ export class RolesController {
   check("loopback: @del -> DELETE", find(r, "/roles/{id}", "DELETE") != null);
   check("loopback: @patch + @put + @del share path",
     r.filter((x) => x.path === "/roles/{id}").length === 3);
-  check("loopback: config-prefix concat -> {apiPath} token",
-    find(r, "{apiPath}/roles", "POST") != null);
-  check("loopback: count path", find(r, "{apiPath}/roles/count", "GET") != null);
-  check("loopback: template literal prefix -> {apiPathV2} token",
-    find(r, "{apiPathV2}/roles", "GET") != null);
+  check("loopback: config-prefix concat -> {appConfig.apiPath} token (full reference)",
+    find(r, "{appConfig.apiPath}/roles", "POST") != null);
+  check("loopback: count path", find(r, "{appConfig.apiPath}/roles/count", "GET") != null);
+  check("loopback: template literal prefix -> {appConfig.apiPathV2} token (full reference)",
+    find(r, "{appConfig.apiPathV2}/roles", "GET") != null);
   check("loopback: decorator name recorded", r.every((x) => /^@(get|post|put|patch|del)$/.test(x.decorator)));
 });
 
@@ -215,6 +215,33 @@ export class Thing {
 }
 `, (file) => {
   check("loopback: no @loopback/rest import -> not detected", tsRoutes(file).length === 0);
+});
+
+// ----------------------------------- LoopBack @api({ basePath }) class base ----
+// @api is LoopBack's only class-level base path; relative method paths compose
+// onto it, and controllerBase is recovered. A method already carrying the full
+// path must NOT be double-prefixed.
+withTempFile("api-base.controller.ts", `
+import { api, get, post } from '@loopback/rest';
+@api({ basePath: '/orders', paths: {} })
+export class OrderController {
+  @get('/{id}')
+  async findById() { return {}; }
+  @post('/batch')
+  async createBatch() { return {}; }
+  @get('/orders/{id}/items')
+  async items() { return []; }
+}
+`, (file) => {
+  const r = tsRoutes(file);
+  check("loopback @api: 3 routes", r.length === 3);
+  check("loopback @api: controllerBase recovered on every route",
+    r.every((x) => x.controllerBase === "/orders"));
+  check("loopback @api: relative path composed", find(r, "/orders/{id}", "GET") != null);
+  check("loopback @api: relative root path composed", find(r, "/orders/batch", "POST") != null);
+  check("loopback @api: full path not double-prefixed",
+    find(r, "/orders/{id}/items", "GET") != null &&
+    !r.some((x) => x.path.includes("/orders/orders")));
 });
 
 // ----------------------------------------------- Vue Router (frontend) ------
@@ -246,6 +273,49 @@ const router = createRouter({ history: createWebHistory(), routes })
 
 withTempFile("not-router.ts", `const routes = [{ path: '/x', component: Foo }]`, (file) => {
   check("vue-router: no vue-router import -> not detected", tsRoutes(file).length === 0);
+});
+
+// ------------------------------------- NestJS route enrichment (BREEZEAI-690) ----
+// @Controller base + @Version + @UseGuards + @Body/@ApiResponse compose into a
+// fully-derived, searchable route. @ApiResponse({ example }) is the oracle.
+withTempFile("role-status.controller.ts", `
+import { Controller, Get, Post, Version, UseGuards, Param, Body } from '@nestjs/common';
+import { ApiResponse } from '@nestjs/swagger';
+
+@Controller('role-status')
+export class RoleStatusController {
+  @Version('1')
+  @UseGuards(JwtAuthGuard)
+  @Get(':id')
+  @ApiResponse({ type: RoleStatusDto, example: { path: '/role-status/1', method: 'GET' } })
+  async detail(@Param('id') id: number) { return id; }
+
+  @Post()
+  async addProject(@Body() dto: AddProjectDto) { return dto; }
+}
+`, (file) => {
+  const r = tsRoutes(file);
+  const detail = r.find((x) => x.handler === "detail");
+  const add = r.find((x) => x.handler === "addProject");
+
+  // AC1 — class base path recovered
+  check("nest690: controllerBase recovered", detail.controllerBase === "role-status");
+  // AC2 — method decorators bound + full route derived
+  check("nest690: version composed into path", detail.path === "/v1/role-status/:id");
+  check("nest690: version field", detail.version === "1");
+  check("nest690: authRequired from @UseGuards", detail.authRequired === true);
+  check("nest690: guards captured", detail.guards.length === 1 && detail.guards[0] === "JwtAuthGuard");
+  check("nest690: route function-scoped w/ handler", detail.scope === "function" && detail.handler === "detail");
+  // AC3/AC4 — DTOs
+  check("nest690: requestDTO from @Body", add.requestDTO === "AddProjectDto");
+  check("nest690: responseDTO from @ApiResponse type", detail.responseDTO === "RoleStatusDto");
+  // AC4 — oracle: @ApiResponse example { path:'/role-status/1', method:'GET' }
+  const oracle = { path: "/role-status/1", method: "GET" };
+  check("nest690: oracle method matches", detail.method === oracle.method);
+  check("nest690: oracle path shape matches (base+param)", detail.path.includes("role-status/:id"));
+  // non-versioned route still recovers base + DTO
+  check("nest690: POST base path", add.path === "role-status" && add.method === "POST");
+  check("nest690: POST inherits no guard", add.authRequired === false);
 });
 
 console.log(`\n✅ All ${passed} assertions passed.`);
