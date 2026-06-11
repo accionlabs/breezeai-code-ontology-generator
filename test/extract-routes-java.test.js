@@ -232,4 +232,46 @@ public class CacheUser {
   check("webflux gate: no import -> no functional routes", r.length === 0);
 });
 
+// --------------------------- composed / meta-annotations (same-file) --------
+withTempFile("ComposedController.java", `
+package com.example;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api")
+class ComposedController {
+    @GetJson("/things")
+    public Object things() { return null; }
+
+    @PostJson
+    public Object make() { return null; }
+}
+
+@GetMapping(produces = "application/json")
+@interface GetJson { String[] value() default {}; }
+
+@RequestMapping(method = RequestMethod.POST)
+@interface PostJson {}
+`, (file) => {
+  const r = extractFileRoutes(file);
+  check("composed: @GetJson -> GET, path from usage + base",
+    find(r, "/api/things") && find(r, "/api/things").method === "GET" &&
+    find(r, "/api/things").decorator === "@GetJson");
+  check("composed: @PostJson (no path) -> POST on base",
+    r.some((x) => x.method === "POST" && x.path === "/api" && x.handler === "make"));
+});
+
+// a custom annotation NOT meta-annotated with a mapping is not a route.
+withTempFile("PlainAnno.java", `
+package com.example;
+class C {
+    @Audited
+    public void run() {}
+}
+@interface Audited {}
+`, (file) => {
+  const r = extractFileRoutes(file);
+  check("composed gate: non-mapping custom annotation -> no route", r.length === 0);
+});
+
 console.log(`\n✅ All ${passed} assertions passed.`);

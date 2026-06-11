@@ -21,6 +21,12 @@
  *     -> file-scoped routes (framework "spring-webflux"); the handler name is
  *     captured from a method reference (handler::all) when present.
  *
+ *   Composed / meta-annotations
+ *     A custom @interface meta-annotated with a Spring mapping (e.g.
+ *     @GetJson -> @GetMapping) is resolved when the @interface is declared in
+ *     the SAME file. Cross-file composed annotations need a repo-wide
+ *     annotation index and are out of scope for this per-file extractor.
+ *
  * For annotation routes the effective endpoint is the class base path joined
  * with the method path, and each route is function-scoped (attached to its
  * handler method). Non-literal paths (constants, ${...}/#{...} placeholders,
@@ -296,10 +302,37 @@ function makeRoute(fields) {
   };
 }
 
+// Composed mapping annotations DEFINED IN THIS FILE: a custom @interface that
+// is itself meta-annotated with a Spring mapping (e.g. @GetJson -> @GetMapping).
+// Returns a Map(customName -> HTTP method). Cross-file composed annotations are
+// out of scope (need a repo-wide annotation index — see header).
+function composedAnnotations(tree, source) {
+  const map = new Map();
+  traverse(tree.rootNode, (node) => {
+    if (node.type !== "annotation_type_declaration") return;
+    const nameNode = node.childForFieldName("name");
+    if (!nameNode) return;
+    const customName = slice(source, nameNode);
+    for (const meta of getAnnotations(node)) {
+      const metaName = annotationName(meta, source);
+      if (SPRING_METHOD_ANNOS[metaName]) {
+        map.set(customName, SPRING_METHOD_ANNOS[metaName]);
+        break;
+      }
+      if (metaName === "RequestMapping") {
+        const methods = springRequestMethods(meta, source);
+        map.set(customName, methods.length ? methods.join(",") : "ANY");
+        break;
+      }
+    }
+  });
+  return map;
+}
+
 // -------------------------------------------------------------------
 // Per-method route detection
 // -------------------------------------------------------------------
-function methodRoutes(methodNode, base, source) {
+function methodRoutes(methodNode, base, source, composed = new Map()) {
   const annos = getAnnotations(methodNode);
   if (!annos.length) return [];
 
@@ -338,6 +371,18 @@ function methodRoutes(methodNode, base, source) {
           method: methodStr,
           path: joinPaths(base.spring, p),
           handler, handlerLine, decorator: "@RequestMapping", requestDTO,
+          text: slice(source, ann), ...li,
+        }));
+      }
+    } else if (composed.has(name)) {
+      // Custom mapping annotation defined in this file (e.g. @GetJson). The
+      // path (if any) is supplied at the usage site; method comes from the meta.
+      for (const p of annotationPaths(ann, source)) {
+        routes.push(makeRoute({
+          framework: "spring",
+          method: composed.get(name),
+          path: joinPaths(base.spring, p),
+          handler, handlerLine, decorator: `@${name}`, requestDTO,
           text: slice(source, ann), ...li,
         }));
       }
@@ -432,6 +477,7 @@ function functionalRoutes(tree, source) {
 function extractRoutes(filePath, source, tree) {
   const routes = [];
   const baseCache = new Map(); // typeNode.startIndex -> base paths
+  const composed = composedAnnotations(tree, source); // same-file @GetJson -> GET
 
   traverse(tree.rootNode, (node) => {
     if (node.type !== "method_declaration") return;
@@ -442,7 +488,7 @@ function extractRoutes(filePath, source, tree) {
       base = classBasePaths(type, source);
       baseCache.set(key, base);
     }
-    routes.push(...methodRoutes(node, base, source));
+    routes.push(...methodRoutes(node, base, source, composed));
   });
 
   // Functional WebFlux routes (call-based), only when the file uses the API.
