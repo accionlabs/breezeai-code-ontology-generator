@@ -6,7 +6,7 @@
  * Python route extractor, so they flow through the identical HAS_STATEMENT
  * ingestion path and reuse the method/endpoint/framework/handler graph props):
  *
- *   Spring MVC / WebFlux
+ *   Spring MVC / annotation-based WebFlux
  *     class : @RequestMapping("/base")  (base path)
  *     method: @GetMapping / @PostMapping / @PutMapping / @DeleteMapping /
  *             @PatchMapping / @RequestMapping(value=..., method=RequestMethod.X)
@@ -16,9 +16,15 @@
  *     method: @GET / @POST / @PUT / @DELETE / @HEAD / @OPTIONS / @PATCH
  *             + optional @Path("/sub")
  *
- * The effective endpoint is the class base path joined with the method path.
- * Each route is function-scoped (attached to its handler method) — Java REST
- * handlers are always methods defined inline, so there is no file-level case.
+ *   Functional WebFlux (call-based, import-gated, best-effort)
+ *     RouterFunctions.route().GET("/p", handler)  and  route(GET("/p"), handler)
+ *     -> file-scoped routes (framework "spring-webflux"); the handler name is
+ *     captured from a method reference (handler::all) when present.
+ *
+ * For annotation routes the effective endpoint is the class base path joined
+ * with the method path, and each route is function-scoped (attached to its
+ * handler method). Non-literal paths (constants, ${...}/#{...} placeholders,
+ * string concatenation) are rendered as {token} segments rather than dropped.
  */
 const Parser = require("tree-sitter");
 const Java = require("tree-sitter-java");
@@ -39,6 +45,11 @@ const SPRING_METHOD_ANNOS = {
 // JAX-RS HTTP-method marker annotations (the annotation name IS the method).
 const JAXRS_HTTP_METHODS = new Set([
   "GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH",
+]);
+// Functional WebFlux builder/predicate verbs (RouterFunctions.route().GET(...),
+// RequestPredicates.GET(...)). The invoked method name IS the HTTP method.
+const WEBFLUX_VERBS = new Set([
+  "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS",
 ]);
 
 const TYPE_DECL_TYPES = new Set([
@@ -277,8 +288,8 @@ function makeRoute(fields) {
     isRegex: false,
     decorator: fields.decorator || null,
     requestDTO: fields.requestDTO || null,
-    scope: "function",
-    handlerLine: fields.handlerLine,
+    scope: fields.scope || "function",
+    handlerLine: fields.handlerLine != null ? fields.handlerLine : null,
     text: (fields.text || `[${fields.framework}] ${method} ${endpoint}`).slice(0, MAX_TEXT),
     startLine: fields.startLine,
     endLine: fields.endLine,
@@ -356,6 +367,65 @@ function methodRoutes(methodNode, base, source) {
   return routes;
 }
 
+// -------------------------------------------------------------------
+// Functional WebFlux (call-based) — RouterFunctions.route().GET("/p", h)
+// and the static-predicate form route(GET("/p"), h). Import-gated to avoid
+// treating any uppercase .GET()/.POST() call as a route (guide §3a / §4).
+// -------------------------------------------------------------------
+function importsWebfluxFunctional(tree, source) {
+  let found = false;
+  traverse(tree.rootNode, (n) => {
+    if (found || n.type !== "import_declaration") return;
+    if (slice(source, n, MAX_TEXT).includes("web.reactive.function.server")) found = true;
+  });
+  return found;
+}
+
+// Handler name referenced as the second arg (handler::all -> "all"; a bare
+// identifier/field handler -> its text; lambdas -> null).
+function webfluxHandler(node, source) {
+  if (!node) return null;
+  if (node.type === "method_reference") {
+    const txt = slice(source, node) || "";
+    const i = txt.lastIndexOf("::");
+    return i >= 0 ? txt.slice(i + 2).trim() : txt;
+  }
+  if (node.type === "identifier" || node.type === "field_access") {
+    return slice(source, node);
+  }
+  return null;
+}
+
+function functionalRoutes(tree, source) {
+  const routes = [];
+  traverse(tree.rootNode, (node) => {
+    if (node.type !== "method_invocation") return;
+    const nameNode = node.childForFieldName("name");
+    if (!nameNode) return;
+    const verb = slice(source, nameNode);
+    if (!WEBFLUX_VERBS.has(verb)) return;
+
+    const args = node.childForFieldName("arguments");
+    if (!args || args.namedChildCount === 0) return;
+    const first = args.namedChild(0);
+    if (first.type !== "string_literal") return;     // need a literal path
+    const path = stringLiteralValue(first, source);
+    if (!path || !path.startsWith("/")) return;        // route-like path gate
+
+    routes.push(makeRoute({
+      framework: "spring-webflux",
+      method: verb,
+      path,
+      handler: args.namedChildCount > 1 ? webfluxHandler(args.namedChild(1), source) : null,
+      scope: "file",                                   // not attached to a handler method
+      text: slice(source, node),
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+    }));
+  });
+  return routes;
+}
+
 /**
  * Main entry: returns an array of route objects for a single Java file.
  */
@@ -374,6 +444,11 @@ function extractRoutes(filePath, source, tree) {
     }
     routes.push(...methodRoutes(node, base, source));
   });
+
+  // Functional WebFlux routes (call-based), only when the file uses the API.
+  if (importsWebfluxFunctional(tree, source)) {
+    routes.push(...functionalRoutes(tree, source));
+  }
 
   routes.sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
   return routes;

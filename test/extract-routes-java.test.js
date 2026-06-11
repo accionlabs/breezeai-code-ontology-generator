@@ -196,4 +196,40 @@ public class NonLiteralController {
     !r.some((x) => x.handler === "byConstant" && x.path === "/api"));
 });
 
+// --------------------------------- functional WebFlux (AC8 / call-based) ----
+withTempFile("UserRoutes.java", `
+package com.example;
+import org.springframework.web.reactive.function.server.*;
+
+public class UserRoutes {
+    public RouterFunction<ServerResponse> routes(UserHandler h) {
+        return RouterFunctions.route()
+            .GET("/flux/users", h::all)
+            .POST("/flux/users", h::create)
+            .build();
+    }
+}
+`, (file) => {
+  const r = extractFileRoutes(file);
+  check("webflux: builder GET captured", find(r, "/flux/users") &&
+    r.some((x) => x.method === "GET" && x.path === "/flux/users"));
+  check("webflux: builder POST captured",
+    r.some((x) => x.method === "POST" && x.path === "/flux/users"));
+  check("webflux: framework + file scope",
+    r.every((x) => x.framework === "spring-webflux" && x.scope === "file"));
+  check("webflux: handler from method reference",
+    r.find((x) => x.method === "GET").handler === "all");
+});
+
+// import-gate: an uppercase .GET() without the WebFlux import is NOT a route.
+withTempFile("CacheUser.java", `
+package com.example;
+public class CacheUser {
+    void warm(Cache c) { c.GET("/not/a/route"); }
+}
+`, (file) => {
+  const r = extractFileRoutes(file);
+  check("webflux gate: no import -> no functional routes", r.length === 0);
+});
+
 console.log(`\n✅ All ${passed} assertions passed.`);
