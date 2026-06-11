@@ -38,6 +38,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
   const calls = extractDirectCalls(node, source);
 
   const { visibility, kind } = getFunctionModifiers(node, source);
+  const decorators = readDecorators(node, source);
 
   const statements = captureStatements ? extractStatements(node, source) : [];
 
@@ -46,6 +47,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
     type: node.type === "constructor_declaration" ? "constructor" : "method",
     visibility,
     kind,
+    decorators,  // [{ name, args }] — method-level annotations (with args)
     params,  // Now returns string array
     startLine,
     endLine,
@@ -88,6 +90,62 @@ function getFunctionModifiers(node, source) {
   }
 
   return { visibility, kind };
+}
+
+// -------------------------------------------------------------------
+// Decorator (annotation) reading — structured { name, args }.
+// Annotations live inside a `modifiers` child of the declaration and come in
+// two grammar forms: `marker_annotation` (@Foo) and `annotation` (@Foo(...)).
+// `name` is the simple (last) segment of a possibly-qualified name; `args` is
+// one entry per top-level argument (string literals unwrapped, everything else
+// kept as faithful source text).
+// -------------------------------------------------------------------
+function readDecorators(node, source) {
+  const decorators = [];
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child.type !== "modifiers") continue;
+    for (let j = 0; j < child.childCount; j++) {
+      const ann = child.child(j);
+      if (ann.type !== "annotation" && ann.type !== "marker_annotation") continue;
+      const name = annotationName(ann, source);
+      if (name) decorators.push({ name, args: annotationArgs(ann, source) });
+    }
+  }
+  return decorators;
+}
+
+function annotationName(ann, source) {
+  const nameNode = ann.childForFieldName("name");
+  if (!nameNode) return null;
+  const txt = source.slice(nameNode.startIndex, nameNode.endIndex);
+  return txt.slice(txt.lastIndexOf(".") + 1);
+}
+
+function annotationArgs(ann, source) {
+  const argsNode = ann.childForFieldName("arguments"); // annotation_argument_list
+  if (!argsNode) return [];
+  const args = [];
+  for (let i = 0; i < argsNode.namedChildCount; i++) {
+    const a = argsNode.namedChild(i);
+    if (a.type === "string_literal") {
+      args.push(stringLiteralValue(a, source));
+    } else {
+      args.push(source.slice(a.startIndex, a.endIndex));
+    }
+  }
+  return args;
+}
+
+// Literal value of a string_literal node (concatenates string_fragment parts).
+function stringLiteralValue(node, source) {
+  let out = "";
+  for (let i = 0; i < node.childCount; i++) {
+    if (node.child(i).type === "string_fragment") {
+      out += source.slice(node.child(i).startIndex, node.child(i).endIndex);
+    }
+  }
+  return out;
 }
 
 function extractFunctionParams(node, source) {
