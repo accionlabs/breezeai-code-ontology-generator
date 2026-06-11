@@ -169,6 +169,23 @@ function springRequestMethods(ann, source) {
   return methods.filter(Boolean);
 }
 
+// Declared type of the first @RequestBody parameter (Spring), else null.
+// Param annotations live under the formal_parameter's `modifiers`, same as
+// class/method annotations.
+function requestBodyType(methodNode, source) {
+  const params = methodNode.childForFieldName("parameters");
+  if (!params) return null;
+  for (let i = 0; i < params.namedChildCount; i++) {
+    const p = params.namedChild(i);
+    if (p.type !== "formal_parameter") continue;
+    const hasBody = getAnnotations(p).some((a) => annotationName(a, source) === "RequestBody");
+    if (!hasBody) continue;
+    const typeNode = p.childForFieldName("type");
+    return typeNode ? slice(source, typeNode) : null;
+  }
+  return null;
+}
+
 // -------------------------------------------------------------------
 // Path joining: <classBase> + <methodPath>
 // -------------------------------------------------------------------
@@ -213,6 +230,7 @@ function makeRoute(fields) {
     kind: "route",
     isRegex: false,
     decorator: fields.decorator || null,
+    requestDTO: fields.requestDTO || null,
     scope: "function",
     handlerLine: fields.handlerLine,
     text: (fields.text || `[${fields.framework}] ${method} ${endpoint}`).slice(0, MAX_TEXT),
@@ -233,6 +251,9 @@ function methodRoutes(methodNode, base, source) {
   // Match the startLine that extract-functions-java records for this method
   // (method_declaration includes its modifiers/annotations).
   const handlerLine = methodNode.startPosition.row + 1;
+  // Spring request-body type → route requestDTO (null for JAX-RS, which uses
+  // unannotated entity params — not detected here).
+  const requestDTO = requestBodyType(methodNode, source);
 
   const routes = [];
 
@@ -246,7 +267,7 @@ function methodRoutes(methodNode, base, source) {
         framework: "spring",
         method: SPRING_METHOD_ANNOS[name],
         path: joinPaths(base.spring, annotationPath(ann, source)),
-        handler, handlerLine, decorator: `@${name}`,
+        handler, handlerLine, decorator: `@${name}`, requestDTO,
         text: slice(source, ann), ...li,
       }));
     } else if (name === "RequestMapping") {
@@ -256,7 +277,7 @@ function methodRoutes(methodNode, base, source) {
         framework: "spring",
         method: methodStr,
         path: joinPaths(base.spring, annotationPath(ann, source)),
-        handler, handlerLine, decorator: "@RequestMapping",
+        handler, handlerLine, decorator: "@RequestMapping", requestDTO,
         text: slice(source, ann), ...li,
       }));
     }
