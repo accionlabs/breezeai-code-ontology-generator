@@ -148,6 +148,10 @@ function stringLiteralValue(node, source) {
   return out;
 }
 
+// Returns [{ name, type, decorators? }] (guide §7). `type` is the declared type
+// text (varargs marked with a trailing `...`); `decorators` is present-only —
+// captures param annotations like @PathVariable / @RequestParam / @RequestBody
+// (Spring) and @PathParam / @QueryParam (JAX-RS).
 function extractFunctionParams(node, source) {
   const paramsNode = node.childForFieldName("parameters");
   if (!paramsNode) return [];
@@ -156,24 +160,55 @@ function extractFunctionParams(node, source) {
 
   for (let i = 0; i < paramsNode.childCount; i++) {
     const child = paramsNode.child(i);
-
     if (!child.isNamed) continue;
+    if (child.type !== "formal_parameter" && child.type !== "spread_parameter") continue;
 
-    if (child.type === "formal_parameter") {
-      const nameNode = child.childForFieldName("name");
-      if (nameNode) {
-        params.push(source.slice(nameNode.startIndex, nameNode.endIndex));
-      }
-    } else if (child.type === "spread_parameter") {
-      // Handle varargs
-      const nameNode = child.childForFieldName("name");
-      if (nameNode) {
-        params.push("..." + source.slice(nameNode.startIndex, nameNode.endIndex));
-      }
-    }
+    const name = paramName(child, source);
+    if (!name) continue;
+
+    let type = paramType(child, source);
+    // varargs: mark with Java's `...` notation instead of prefixing the name.
+    if (child.type === "spread_parameter" && type) type += "...";
+
+    const param = { name, type };
+    const decorators = readDecorators(child, source);
+    if (decorators.length) param.decorators = decorators; // present-only
+    params.push(param);
   }
 
   return params;
+}
+
+// Parameter name. For `spread_parameter` (varargs) the name lives inside a
+// `variable_declarator`, not on a direct `name` field.
+function paramName(child, source) {
+  let nameNode = child.childForFieldName("name");
+  if (!nameNode) {
+    for (let i = 0; i < child.childCount; i++) {
+      if (child.child(i).type === "variable_declarator") {
+        nameNode = child.child(i).childForFieldName("name");
+        break;
+      }
+    }
+  }
+  return nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null;
+}
+
+// Parameter type text. `formal_parameter` exposes a `type` field; `spread_parameter`
+// (varargs) does not — its type is the positional child before the declarator.
+function paramType(child, source) {
+  let typeNode = child.childForFieldName("type");
+  if (!typeNode && child.type === "spread_parameter") {
+    for (let i = 0; i < child.childCount; i++) {
+      const c = child.child(i);
+      if (!c.isNamed) continue;
+      if (c.type === "variable_declarator" || c.type === "modifiers" ||
+          c.type === "annotation" || c.type === "marker_annotation") continue;
+      typeNode = c;
+      break;
+    }
+  }
+  return typeNode ? source.slice(typeNode.startIndex, typeNode.endIndex) : null;
 }
 
 function getFunctionName(node, source) {
