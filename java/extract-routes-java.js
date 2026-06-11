@@ -119,6 +119,25 @@ function valueToString(node, source) {
   return null;
 }
 
+// Resolve a value node to all literal strings: a single string_literal -> one
+// element; a {"a","b"} array initializer -> one element per literal.
+function valueToStringList(node, source) {
+  if (!node) return [];
+  if (node.type === "string_literal") {
+    const s = stringLiteralValue(node, source);
+    return s != null ? [s] : [];
+  }
+  if (node.type === "element_value_array_initializer") {
+    const out = [];
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const s = stringLiteralValue(node.namedChild(i), source);
+      if (s != null) out.push(s);
+    }
+    return out;
+  }
+  return [];
+}
+
 function getNamedArg(argList, name, source) {
   if (!argList) return null;
   for (let i = 0; i < argList.namedChildCount; i++) {
@@ -148,6 +167,25 @@ function annotationPath(ann, source) {
   // Named value= / path=
   const v = getNamedArg(args, "value", source) || getNamedArg(args, "path", source);
   return v ? valueToString(v, source) : null;
+}
+
+// All paths declared by an annotation (multi-path arrays -> one per element).
+// Returns [null] when no literal path is present, so callers emit exactly one
+// route bearing the base path (e.g. @PostMapping with no args).
+function annotationPaths(ann, source) {
+  const args = getArgList(ann);
+  if (!args) return [null];
+
+  for (let i = 0; i < args.namedChildCount; i++) {
+    const c = args.namedChild(i);
+    if (c.type === "string_literal" || c.type === "element_value_array_initializer") {
+      const list = valueToStringList(c, source);
+      return list.length ? list : [null];
+    }
+  }
+  const v = getNamedArg(args, "value", source) || getNamedArg(args, "path", source);
+  const list = v ? valueToStringList(v, source) : [];
+  return list.length ? list : [null];
 }
 
 // HTTP methods from a Spring @RequestMapping(method=RequestMethod.X | {X, Y}).
@@ -263,23 +301,27 @@ function methodRoutes(methodNode, base, source) {
     const li = { startLine: ann.startPosition.row + 1, endLine: ann.endPosition.row + 1 };
 
     if (SPRING_METHOD_ANNOS[name]) {
-      routes.push(makeRoute({
-        framework: "spring",
-        method: SPRING_METHOD_ANNOS[name],
-        path: joinPaths(base.spring, annotationPath(ann, source)),
-        handler, handlerLine, decorator: `@${name}`, requestDTO,
-        text: slice(source, ann), ...li,
-      }));
+      for (const p of annotationPaths(ann, source)) {
+        routes.push(makeRoute({
+          framework: "spring",
+          method: SPRING_METHOD_ANNOS[name],
+          path: joinPaths(base.spring, p),
+          handler, handlerLine, decorator: `@${name}`, requestDTO,
+          text: slice(source, ann), ...li,
+        }));
+      }
     } else if (name === "RequestMapping") {
       const methods = springRequestMethods(ann, source);
       const methodStr = methods.length ? methods.join(",") : "ANY";
-      routes.push(makeRoute({
-        framework: "spring",
-        method: methodStr,
-        path: joinPaths(base.spring, annotationPath(ann, source)),
-        handler, handlerLine, decorator: "@RequestMapping", requestDTO,
-        text: slice(source, ann), ...li,
-      }));
+      for (const p of annotationPaths(ann, source)) {
+        routes.push(makeRoute({
+          framework: "spring",
+          method: methodStr,
+          path: joinPaths(base.spring, p),
+          handler, handlerLine, decorator: "@RequestMapping", requestDTO,
+          text: slice(source, ann), ...li,
+        }));
+      }
     }
   }
 
