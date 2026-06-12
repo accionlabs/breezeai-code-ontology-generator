@@ -6,7 +6,7 @@
  * Python route extractor, so they flow through the identical HAS_STATEMENT
  * ingestion path and reuse the method/endpoint/framework/handler graph props):
  *
- *   Spring MVC / WebFlux
+ *   Spring MVC / annotation-based WebFlux
  *     class : @RequestMapping("/base")  (base path)
  *     method: @GetMapping / @PostMapping / @PutMapping / @DeleteMapping /
  *             @PatchMapping / @RequestMapping(value=..., method=RequestMethod.X)
@@ -16,9 +16,21 @@
  *     method: @GET / @POST / @PUT / @DELETE / @HEAD / @OPTIONS / @PATCH
  *             + optional @Path("/sub")
  *
- * The effective endpoint is the class base path joined with the method path.
- * Each route is function-scoped (attached to its handler method) — Java REST
- * handlers are always methods defined inline, so there is no file-level case.
+ *   Functional routing — WebMvc.fn + WebFlux (call-based, import-gated)
+ *     RouterFunctions.route().GET("/p", handler)  and  route(GET("/p"), handler)
+ *     -> file-scoped routes (framework "spring-functional"); the handler name is
+ *     captured from a method reference (handler::all) when present.
+ *
+ *   Composed / meta-annotations
+ *     A custom @interface meta-annotated with a Spring mapping (e.g.
+ *     @GetJson -> @GetMapping) is resolved when the @interface is declared in
+ *     the SAME file. Cross-file composed annotations need a repo-wide
+ *     annotation index and are out of scope for this per-file extractor.
+ *
+ * For annotation routes the effective endpoint is the class base path joined
+ * with the method path, and each route is function-scoped (attached to its
+ * handler method). Non-literal paths (constants, ${...}/#{...} placeholders,
+ * string concatenation) are rendered as {token} segments rather than dropped.
  */
 const Parser = require("tree-sitter");
 const Java = require("tree-sitter-java");
@@ -39,6 +51,12 @@ const SPRING_METHOD_ANNOS = {
 // JAX-RS HTTP-method marker annotations (the annotation name IS the method).
 const JAXRS_HTTP_METHODS = new Set([
   "GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH",
+]);
+// Functional-routing builder/predicate verbs (RouterFunctions.route().GET(...),
+// RequestPredicates.GET(...)) — shared by Spring WebMvc.fn and WebFlux. The
+// invoked method name IS the HTTP method.
+const FUNCTIONAL_VERBS = new Set([
+  "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS",
 ]);
 
 const TYPE_DECL_TYPES = new Set([
@@ -95,28 +113,88 @@ function getArgList(ann) {
   return null;
 }
 
-// Literal value of a string_literal node (concatenates string_fragment parts).
+// Decode a Java escape_sequence node's text (e.g. "\\d" -> "\d", "\\u002F" -> "/").
+function decodeJavaEscape(seq) {
+  if (!seq || seq.length < 2) return seq || "";
+  const c = seq[1];
+  switch (c) {
+    case "n": return "\n";
+    case "t": return "\t";
+    case "r": return "\r";
+    case "b": return "\b";
+    case "f": return "\f";
+    case "0": return "\0";
+    case "\\": return "\\";
+    case "'": return "'";
+    case '"': return '"';
+    case "u": {
+      const code = parseInt(seq.slice(2), 16);
+      return Number.isNaN(code) ? seq : String.fromCharCode(code);
+    }
+    default: return seq.slice(1); // unknown escape -> drop the backslash
+  }
+}
+
+// Literal value of a string_literal node: concatenates string_fragment parts and
+// decoded escape sequences (so regex/escaped paths like {sku:\\d+} survive).
 function stringLiteralValue(node, source) {
   if (!node || node.type !== "string_literal") return null;
   let out = "";
   for (let i = 0; i < node.childCount; i++) {
-    if (node.child(i).type === "string_fragment") out += slice(source, node.child(i));
+    const c = node.child(i);
+    if (c.type === "string_fragment") out += slice(source, c);
+    else if (c.type === "escape_sequence") out += decodeJavaEscape(slice(source, c));
   }
   return out;
 }
 
-// Resolve a value node to a string: handles string_literal and the first
-// element of a {"a","b"} array initializer.
-function valueToString(node, source) {
+// Spring property placeholders ${...} and SpEL #{...} -> {...} token form.
+function tokenizePath(s) {
+  return s.replace(/[$#]\{([^}]*)\}/g, "{$1}");
+}
+
+// Resolve a single annotation value node to a path string. Literals are taken
+// verbatim (with ${x}/#{x} placeholders rewritten to {x}); unresolved
+// constants / field accesses are rendered as {lastSegment}; string
+// concatenation joins its tokenized operands. Returns null when nothing usable.
+function resolvePath(node, source) {
   if (!node) return null;
-  if (node.type === "string_literal") return stringLiteralValue(node, source);
-  if (node.type === "element_value_array_initializer") {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const s = stringLiteralValue(node.namedChild(i), source);
-      if (s != null) return s;
+  switch (node.type) {
+    case "string_literal": {
+      const s = stringLiteralValue(node, source);
+      return s != null ? tokenizePath(s) : null;
     }
+    case "identifier":
+    case "field_access":
+    case "scoped_identifier": {
+      const txt = slice(source, node) || "";
+      const seg = txt.slice(txt.lastIndexOf(".") + 1).trim();
+      return seg ? `{${seg}}` : null;
+    }
+    case "binary_expression": {
+      // String concatenation (a + b + ...) -> join tokenized operands.
+      const l = resolvePath(node.childForFieldName("left"), source) || "";
+      const r = resolvePath(node.childForFieldName("right"), source) || "";
+      return (l + r) || null;
+    }
+    default:
+      return null;
   }
-  return null;
+}
+
+// Resolve a value node to all path strings: a {"a","b"} array -> one per
+// element; any other node -> a single resolved path (tokenized if non-literal).
+function pathValuesFrom(node, source) {
+  if (!node) return [];
+  if (node.type === "element_value_array_initializer") {
+    const out = [];
+    for (let i = 0; i < node.namedChildCount; i++) {
+      out.push(...pathValuesFrom(node.namedChild(i), source));
+    }
+    return out;
+  }
+  const v = resolvePath(node, source);
+  return v != null ? [v] : [];
 }
 
 function getNamedArg(argList, name, source) {
@@ -133,21 +211,32 @@ function getNamedArg(argList, name, source) {
   return null;
 }
 
-// Path declared by an annotation: positional string, or value=/path= attribute.
+// Single path declared by an annotation (first of any multi-path set), or null.
+// Used for class base paths and JAX-RS @Path (single-valued by design).
 function annotationPath(ann, source) {
-  const args = getArgList(ann);
-  if (!args) return null;
+  const paths = annotationPaths(ann, source);
+  return paths.length ? paths[0] : null;
+}
 
-  // Positional string or array (no `name=`).
+// All paths declared by an annotation (multi-path arrays -> one per element;
+// non-literal constants/placeholders tokenized via resolvePath). Returns [null]
+// when no path is present, so callers emit exactly one route bearing the base
+// path (e.g. @PostMapping with no args).
+function annotationPaths(ann, source) {
+  const args = getArgList(ann);
+  if (!args) return [null];
+
+  // Positional value (string, array, or non-literal like a constant ref).
   for (let i = 0; i < args.namedChildCount; i++) {
     const c = args.namedChild(i);
-    if (c.type === "string_literal" || c.type === "element_value_array_initializer") {
-      return valueToString(c, source);
-    }
+    if (c.type === "element_value_pair") continue; // named args handled below
+    const list = pathValuesFrom(c, source);
+    if (list.length) return list;
   }
   // Named value= / path=
   const v = getNamedArg(args, "value", source) || getNamedArg(args, "path", source);
-  return v ? valueToString(v, source) : null;
+  const list = v ? pathValuesFrom(v, source) : [];
+  return list.length ? list : [null];
 }
 
 // HTTP methods from a Spring @RequestMapping(method=RequestMethod.X | {X, Y}).
@@ -167,6 +256,23 @@ function springRequestMethods(ann, source) {
     pushFieldAccess(v);
   }
   return methods.filter(Boolean);
+}
+
+// Declared type of the first @RequestBody parameter (Spring), else null.
+// Param annotations live under the formal_parameter's `modifiers`, same as
+// class/method annotations.
+function requestBodyType(methodNode, source) {
+  const params = methodNode.childForFieldName("parameters");
+  if (!params) return null;
+  for (let i = 0; i < params.namedChildCount; i++) {
+    const p = params.namedChild(i);
+    if (p.type !== "formal_parameter") continue;
+    const hasBody = getAnnotations(p).some((a) => annotationName(a, source) === "RequestBody");
+    if (!hasBody) continue;
+    const typeNode = p.childForFieldName("type");
+    return typeNode ? slice(source, typeNode) : null;
+  }
+  return null;
 }
 
 // -------------------------------------------------------------------
@@ -213,18 +319,46 @@ function makeRoute(fields) {
     kind: "route",
     isRegex: false,
     decorator: fields.decorator || null,
-    scope: "function",
-    handlerLine: fields.handlerLine,
+    requestDTO: fields.requestDTO || null,
+    scope: fields.scope || "function",
+    handlerLine: fields.handlerLine != null ? fields.handlerLine : null,
     text: (fields.text || `[${fields.framework}] ${method} ${endpoint}`).slice(0, MAX_TEXT),
     startLine: fields.startLine,
     endLine: fields.endLine,
   };
 }
 
+// Composed mapping annotations DEFINED IN THIS FILE: a custom @interface that
+// is itself meta-annotated with a Spring mapping (e.g. @GetJson -> @GetMapping).
+// Returns a Map(customName -> HTTP method). Cross-file composed annotations are
+// out of scope (need a repo-wide annotation index — see header).
+function composedAnnotations(tree, source) {
+  const map = new Map();
+  traverse(tree.rootNode, (node) => {
+    if (node.type !== "annotation_type_declaration") return;
+    const nameNode = node.childForFieldName("name");
+    if (!nameNode) return;
+    const customName = slice(source, nameNode);
+    for (const meta of getAnnotations(node)) {
+      const metaName = annotationName(meta, source);
+      if (SPRING_METHOD_ANNOS[metaName]) {
+        map.set(customName, SPRING_METHOD_ANNOS[metaName]);
+        break;
+      }
+      if (metaName === "RequestMapping") {
+        const methods = springRequestMethods(meta, source);
+        map.set(customName, methods.length ? methods.join(",") : "ANY");
+        break;
+      }
+    }
+  });
+  return map;
+}
+
 // -------------------------------------------------------------------
 // Per-method route detection
 // -------------------------------------------------------------------
-function methodRoutes(methodNode, base, source) {
+function methodRoutes(methodNode, base, source, composed = new Map()) {
   const annos = getAnnotations(methodNode);
   if (!annos.length) return [];
 
@@ -233,6 +367,9 @@ function methodRoutes(methodNode, base, source) {
   // Match the startLine that extract-functions-java records for this method
   // (method_declaration includes its modifiers/annotations).
   const handlerLine = methodNode.startPosition.row + 1;
+  // Spring request-body type → route requestDTO (null for JAX-RS, which uses
+  // unannotated entity params — not detected here).
+  const requestDTO = requestBodyType(methodNode, source);
 
   const routes = [];
 
@@ -242,23 +379,39 @@ function methodRoutes(methodNode, base, source) {
     const li = { startLine: ann.startPosition.row + 1, endLine: ann.endPosition.row + 1 };
 
     if (SPRING_METHOD_ANNOS[name]) {
-      routes.push(makeRoute({
-        framework: "spring",
-        method: SPRING_METHOD_ANNOS[name],
-        path: joinPaths(base.spring, annotationPath(ann, source)),
-        handler, handlerLine, decorator: `@${name}`,
-        text: slice(source, ann), ...li,
-      }));
+      for (const p of annotationPaths(ann, source)) {
+        routes.push(makeRoute({
+          framework: "spring",
+          method: SPRING_METHOD_ANNOS[name],
+          path: joinPaths(base.spring, p),
+          handler, handlerLine, decorator: `@${name}`, requestDTO,
+          text: slice(source, ann), ...li,
+        }));
+      }
     } else if (name === "RequestMapping") {
       const methods = springRequestMethods(ann, source);
       const methodStr = methods.length ? methods.join(",") : "ANY";
-      routes.push(makeRoute({
-        framework: "spring",
-        method: methodStr,
-        path: joinPaths(base.spring, annotationPath(ann, source)),
-        handler, handlerLine, decorator: "@RequestMapping",
-        text: slice(source, ann), ...li,
-      }));
+      for (const p of annotationPaths(ann, source)) {
+        routes.push(makeRoute({
+          framework: "spring",
+          method: methodStr,
+          path: joinPaths(base.spring, p),
+          handler, handlerLine, decorator: "@RequestMapping", requestDTO,
+          text: slice(source, ann), ...li,
+        }));
+      }
+    } else if (composed.has(name)) {
+      // Custom mapping annotation defined in this file (e.g. @GetJson). The
+      // path (if any) is supplied at the usage site; method comes from the meta.
+      for (const p of annotationPaths(ann, source)) {
+        routes.push(makeRoute({
+          framework: "spring",
+          method: composed.get(name),
+          path: joinPaths(base.spring, p),
+          handler, handlerLine, decorator: `@${name}`, requestDTO,
+          text: slice(source, ann), ...li,
+        }));
+      }
     }
   }
 
@@ -285,12 +438,76 @@ function methodRoutes(methodNode, base, source) {
   return routes;
 }
 
+// -------------------------------------------------------------------
+// Functional routing (call-based) — RouterFunctions.route().GET("/p", h) and
+// the static-predicate form route(GET("/p"), h). Covers Spring WebMvc.fn
+// (web.servlet.function) and WebFlux (web.reactive.function.server). Import-
+// gated to avoid treating any uppercase .GET()/.POST() call as a route
+// (guide §3a / §4).
+// -------------------------------------------------------------------
+function importsFunctionalRouting(tree, source) {
+  let found = false;
+  traverse(tree.rootNode, (n) => {
+    if (found || n.type !== "import_declaration") return;
+    const txt = slice(source, n, MAX_TEXT);
+    if (txt.includes("web.servlet.function") ||
+        txt.includes("web.reactive.function.server")) found = true;
+  });
+  return found;
+}
+
+// Handler name referenced as the second arg (handler::all -> "all"; a bare
+// identifier/field handler -> its text; lambdas -> null).
+function functionalHandler(node, source) {
+  if (!node) return null;
+  if (node.type === "method_reference") {
+    const txt = slice(source, node) || "";
+    const i = txt.lastIndexOf("::");
+    return i >= 0 ? txt.slice(i + 2).trim() : txt;
+  }
+  if (node.type === "identifier" || node.type === "field_access") {
+    return slice(source, node);
+  }
+  return null;
+}
+
+function functionalRoutes(tree, source) {
+  const routes = [];
+  traverse(tree.rootNode, (node) => {
+    if (node.type !== "method_invocation") return;
+    const nameNode = node.childForFieldName("name");
+    if (!nameNode) return;
+    const verb = slice(source, nameNode);
+    if (!FUNCTIONAL_VERBS.has(verb)) return;
+
+    const args = node.childForFieldName("arguments");
+    if (!args || args.namedChildCount === 0) return;
+    const first = args.namedChild(0);
+    if (first.type !== "string_literal") return;     // need a literal path
+    const path = stringLiteralValue(first, source);
+    if (!path || !path.startsWith("/")) return;        // route-like path gate
+
+    routes.push(makeRoute({
+      framework: "spring-functional",
+      method: verb,
+      path,
+      handler: args.namedChildCount > 1 ? functionalHandler(args.namedChild(1), source) : null,
+      scope: "file",                                   // not attached to a handler method
+      text: slice(source, node),
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+    }));
+  });
+  return routes;
+}
+
 /**
  * Main entry: returns an array of route objects for a single Java file.
  */
 function extractRoutes(filePath, source, tree) {
   const routes = [];
   const baseCache = new Map(); // typeNode.startIndex -> base paths
+  const composed = composedAnnotations(tree, source); // same-file @GetJson -> GET
 
   traverse(tree.rootNode, (node) => {
     if (node.type !== "method_declaration") return;
@@ -301,8 +518,13 @@ function extractRoutes(filePath, source, tree) {
       base = classBasePaths(type, source);
       baseCache.set(key, base);
     }
-    routes.push(...methodRoutes(node, base, source));
+    routes.push(...methodRoutes(node, base, source, composed));
   });
+
+  // Functional routes (call-based), only when the file uses the API.
+  if (importsFunctionalRouting(tree, source)) {
+    routes.push(...functionalRoutes(tree, source));
+  }
 
   routes.sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
   return routes;

@@ -38,6 +38,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
   const calls = extractDirectCalls(node, source);
 
   const { visibility, kind } = getFunctionModifiers(node, source);
+  const decorators = readDecorators(node, source);
 
   const statements = captureStatements ? extractStatements(node, source) : [];
 
@@ -46,6 +47,7 @@ function extractFunctionInfo(node, filePath, repoPath = null, source, captureSou
     type: node.type === "constructor_declaration" ? "constructor" : "method",
     visibility,
     kind,
+    decorators,  // [{ name, args }] — method-level annotations (with args)
     params,  // Now returns string array
     startLine,
     endLine,
@@ -90,6 +92,92 @@ function getFunctionModifiers(node, source) {
   return { visibility, kind };
 }
 
+// -------------------------------------------------------------------
+// Decorator (annotation) reading — structured { name, args }.
+// Annotations live inside a `modifiers` child of the declaration and come in
+// two grammar forms: `marker_annotation` (@Foo) and `annotation` (@Foo(...)).
+// `name` is the simple (last) segment of a possibly-qualified name; `args` is
+// one entry per top-level argument (string literals unwrapped, everything else
+// kept as faithful source text).
+// -------------------------------------------------------------------
+function readDecorators(node, source) {
+  const decorators = [];
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child.type !== "modifiers") continue;
+    for (let j = 0; j < child.childCount; j++) {
+      const ann = child.child(j);
+      if (ann.type !== "annotation" && ann.type !== "marker_annotation") continue;
+      const name = annotationName(ann, source);
+      if (name) decorators.push({ name, args: annotationArgs(ann, source) });
+    }
+  }
+  return decorators;
+}
+
+function annotationName(ann, source) {
+  const nameNode = ann.childForFieldName("name");
+  if (!nameNode) return null;
+  const txt = source.slice(nameNode.startIndex, nameNode.endIndex);
+  return txt.slice(txt.lastIndexOf(".") + 1);
+}
+
+function annotationArgs(ann, source) {
+  const argsNode = ann.childForFieldName("arguments"); // annotation_argument_list
+  if (!argsNode) return [];
+  const args = [];
+  for (let i = 0; i < argsNode.namedChildCount; i++) {
+    const a = argsNode.namedChild(i);
+    if (a.type === "string_literal") {
+      args.push(stringLiteralValue(a, source));
+    } else {
+      args.push(source.slice(a.startIndex, a.endIndex));
+    }
+  }
+  return args;
+}
+
+// Decode a Java escape_sequence node's text (e.g. "\\d" -> "\d", "\\u002F" -> "/").
+function decodeJavaEscape(seq) {
+  if (!seq || seq.length < 2) return seq || "";
+  const c = seq[1];
+  switch (c) {
+    case "n": return "\n";
+    case "t": return "\t";
+    case "r": return "\r";
+    case "b": return "\b";
+    case "f": return "\f";
+    case "0": return "\0";
+    case "\\": return "\\";
+    case "'": return "'";
+    case '"': return '"';
+    case "u": {
+      const code = parseInt(seq.slice(2), 16);
+      return Number.isNaN(code) ? seq : String.fromCharCode(code);
+    }
+    default: return seq.slice(1);
+  }
+}
+
+// Literal value of a string_literal node: string_fragment parts plus decoded
+// escape sequences (so escaped chars in decorator args survive).
+function stringLiteralValue(node, source) {
+  let out = "";
+  for (let i = 0; i < node.childCount; i++) {
+    const c = node.child(i);
+    if (c.type === "string_fragment") {
+      out += source.slice(c.startIndex, c.endIndex);
+    } else if (c.type === "escape_sequence") {
+      out += decodeJavaEscape(source.slice(c.startIndex, c.endIndex));
+    }
+  }
+  return out;
+}
+
+// Returns [{ name, type, decorators? }] (guide §7). `type` is the declared type
+// text (varargs marked with a trailing `...`); `decorators` is present-only —
+// captures param annotations like @PathVariable / @RequestParam / @RequestBody
+// (Spring) and @PathParam / @QueryParam (JAX-RS).
 function extractFunctionParams(node, source) {
   const paramsNode = node.childForFieldName("parameters");
   if (!paramsNode) return [];
@@ -98,24 +186,55 @@ function extractFunctionParams(node, source) {
 
   for (let i = 0; i < paramsNode.childCount; i++) {
     const child = paramsNode.child(i);
-
     if (!child.isNamed) continue;
+    if (child.type !== "formal_parameter" && child.type !== "spread_parameter") continue;
 
-    if (child.type === "formal_parameter") {
-      const nameNode = child.childForFieldName("name");
-      if (nameNode) {
-        params.push(source.slice(nameNode.startIndex, nameNode.endIndex));
-      }
-    } else if (child.type === "spread_parameter") {
-      // Handle varargs
-      const nameNode = child.childForFieldName("name");
-      if (nameNode) {
-        params.push("..." + source.slice(nameNode.startIndex, nameNode.endIndex));
-      }
-    }
+    const name = paramName(child, source);
+    if (!name) continue;
+
+    let type = paramType(child, source);
+    // varargs: mark with Java's `...` notation instead of prefixing the name.
+    if (child.type === "spread_parameter" && type) type += "...";
+
+    const param = { name, type };
+    const decorators = readDecorators(child, source);
+    if (decorators.length) param.decorators = decorators; // present-only
+    params.push(param);
   }
 
   return params;
+}
+
+// Parameter name. For `spread_parameter` (varargs) the name lives inside a
+// `variable_declarator`, not on a direct `name` field.
+function paramName(child, source) {
+  let nameNode = child.childForFieldName("name");
+  if (!nameNode) {
+    for (let i = 0; i < child.childCount; i++) {
+      if (child.child(i).type === "variable_declarator") {
+        nameNode = child.child(i).childForFieldName("name");
+        break;
+      }
+    }
+  }
+  return nameNode ? source.slice(nameNode.startIndex, nameNode.endIndex) : null;
+}
+
+// Parameter type text. `formal_parameter` exposes a `type` field; `spread_parameter`
+// (varargs) does not — its type is the positional child before the declarator.
+function paramType(child, source) {
+  let typeNode = child.childForFieldName("type");
+  if (!typeNode && child.type === "spread_parameter") {
+    for (let i = 0; i < child.childCount; i++) {
+      const c = child.child(i);
+      if (!c.isNamed) continue;
+      if (c.type === "variable_declarator" || c.type === "modifiers" ||
+          c.type === "annotation" || c.type === "marker_annotation") continue;
+      typeNode = c;
+      break;
+    }
+  }
+  return typeNode ? source.slice(typeNode.startIndex, typeNode.endIndex) : null;
 }
 
 function getFunctionName(node, source) {
