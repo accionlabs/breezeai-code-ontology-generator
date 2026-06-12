@@ -137,12 +137,38 @@ function annotationArgs(ann, source) {
   return args;
 }
 
-// Literal value of a string_literal node (concatenates string_fragment parts).
+// Decode a Java escape_sequence node's text (e.g. "\\d" -> "\d", "\\u002F" -> "/").
+function decodeJavaEscape(seq) {
+  if (!seq || seq.length < 2) return seq || "";
+  const c = seq[1];
+  switch (c) {
+    case "n": return "\n";
+    case "t": return "\t";
+    case "r": return "\r";
+    case "b": return "\b";
+    case "f": return "\f";
+    case "0": return "\0";
+    case "\\": return "\\";
+    case "'": return "'";
+    case '"': return '"';
+    case "u": {
+      const code = parseInt(seq.slice(2), 16);
+      return Number.isNaN(code) ? seq : String.fromCharCode(code);
+    }
+    default: return seq.slice(1);
+  }
+}
+
+// Literal value of a string_literal node: string_fragment parts plus decoded
+// escape sequences (so escaped chars in decorator args survive).
 function stringLiteralValue(node, source) {
   let out = "";
   for (let i = 0; i < node.childCount; i++) {
-    if (node.child(i).type === "string_fragment") {
-      out += source.slice(node.child(i).startIndex, node.child(i).endIndex);
+    const c = node.child(i);
+    if (c.type === "string_fragment") {
+      out += source.slice(c.startIndex, c.endIndex);
+    } else if (c.type === "escape_sequence") {
+      out += decodeJavaEscape(source.slice(c.startIndex, c.endIndex));
     }
   }
   return out;

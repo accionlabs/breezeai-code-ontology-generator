@@ -216,7 +216,7 @@ public class UserRoutes {
   check("webflux: builder POST captured",
     r.some((x) => x.method === "POST" && x.path === "/flux/users"));
   check("webflux: framework + file scope",
-    r.every((x) => x.framework === "spring-webflux" && x.scope === "file"));
+    r.every((x) => x.framework === "spring-functional" && x.scope === "file"));
   check("webflux: handler from method reference",
     r.find((x) => x.method === "GET").handler === "all");
 });

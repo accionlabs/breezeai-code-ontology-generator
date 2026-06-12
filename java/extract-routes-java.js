@@ -16,9 +16,9 @@
  *     method: @GET / @POST / @PUT / @DELETE / @HEAD / @OPTIONS / @PATCH
  *             + optional @Path("/sub")
  *
- *   Functional WebFlux (call-based, import-gated, best-effort)
+ *   Functional routing — WebMvc.fn + WebFlux (call-based, import-gated)
  *     RouterFunctions.route().GET("/p", handler)  and  route(GET("/p"), handler)
- *     -> file-scoped routes (framework "spring-webflux"); the handler name is
+ *     -> file-scoped routes (framework "spring-functional"); the handler name is
  *     captured from a method reference (handler::all) when present.
  *
  *   Composed / meta-annotations
@@ -52,9 +52,10 @@ const SPRING_METHOD_ANNOS = {
 const JAXRS_HTTP_METHODS = new Set([
   "GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH",
 ]);
-// Functional WebFlux builder/predicate verbs (RouterFunctions.route().GET(...),
-// RequestPredicates.GET(...)). The invoked method name IS the HTTP method.
-const WEBFLUX_VERBS = new Set([
+// Functional-routing builder/predicate verbs (RouterFunctions.route().GET(...),
+// RequestPredicates.GET(...)) — shared by Spring WebMvc.fn and WebFlux. The
+// invoked method name IS the HTTP method.
+const FUNCTIONAL_VERBS = new Set([
   "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS",
 ]);
 
@@ -112,12 +113,37 @@ function getArgList(ann) {
   return null;
 }
 
-// Literal value of a string_literal node (concatenates string_fragment parts).
+// Decode a Java escape_sequence node's text (e.g. "\\d" -> "\d", "\\u002F" -> "/").
+function decodeJavaEscape(seq) {
+  if (!seq || seq.length < 2) return seq || "";
+  const c = seq[1];
+  switch (c) {
+    case "n": return "\n";
+    case "t": return "\t";
+    case "r": return "\r";
+    case "b": return "\b";
+    case "f": return "\f";
+    case "0": return "\0";
+    case "\\": return "\\";
+    case "'": return "'";
+    case '"': return '"';
+    case "u": {
+      const code = parseInt(seq.slice(2), 16);
+      return Number.isNaN(code) ? seq : String.fromCharCode(code);
+    }
+    default: return seq.slice(1); // unknown escape -> drop the backslash
+  }
+}
+
+// Literal value of a string_literal node: concatenates string_fragment parts and
+// decoded escape sequences (so regex/escaped paths like {sku:\\d+} survive).
 function stringLiteralValue(node, source) {
   if (!node || node.type !== "string_literal") return null;
   let out = "";
   for (let i = 0; i < node.childCount; i++) {
-    if (node.child(i).type === "string_fragment") out += slice(source, node.child(i));
+    const c = node.child(i);
+    if (c.type === "string_fragment") out += slice(source, c);
+    else if (c.type === "escape_sequence") out += decodeJavaEscape(slice(source, c));
   }
   return out;
 }
@@ -413,22 +439,26 @@ function methodRoutes(methodNode, base, source, composed = new Map()) {
 }
 
 // -------------------------------------------------------------------
-// Functional WebFlux (call-based) — RouterFunctions.route().GET("/p", h)
-// and the static-predicate form route(GET("/p"), h). Import-gated to avoid
-// treating any uppercase .GET()/.POST() call as a route (guide §3a / §4).
+// Functional routing (call-based) — RouterFunctions.route().GET("/p", h) and
+// the static-predicate form route(GET("/p"), h). Covers Spring WebMvc.fn
+// (web.servlet.function) and WebFlux (web.reactive.function.server). Import-
+// gated to avoid treating any uppercase .GET()/.POST() call as a route
+// (guide §3a / §4).
 // -------------------------------------------------------------------
-function importsWebfluxFunctional(tree, source) {
+function importsFunctionalRouting(tree, source) {
   let found = false;
   traverse(tree.rootNode, (n) => {
     if (found || n.type !== "import_declaration") return;
-    if (slice(source, n, MAX_TEXT).includes("web.reactive.function.server")) found = true;
+    const txt = slice(source, n, MAX_TEXT);
+    if (txt.includes("web.servlet.function") ||
+        txt.includes("web.reactive.function.server")) found = true;
   });
   return found;
 }
 
 // Handler name referenced as the second arg (handler::all -> "all"; a bare
 // identifier/field handler -> its text; lambdas -> null).
-function webfluxHandler(node, source) {
+function functionalHandler(node, source) {
   if (!node) return null;
   if (node.type === "method_reference") {
     const txt = slice(source, node) || "";
@@ -448,7 +478,7 @@ function functionalRoutes(tree, source) {
     const nameNode = node.childForFieldName("name");
     if (!nameNode) return;
     const verb = slice(source, nameNode);
-    if (!WEBFLUX_VERBS.has(verb)) return;
+    if (!FUNCTIONAL_VERBS.has(verb)) return;
 
     const args = node.childForFieldName("arguments");
     if (!args || args.namedChildCount === 0) return;
@@ -458,10 +488,10 @@ function functionalRoutes(tree, source) {
     if (!path || !path.startsWith("/")) return;        // route-like path gate
 
     routes.push(makeRoute({
-      framework: "spring-webflux",
+      framework: "spring-functional",
       method: verb,
       path,
-      handler: args.namedChildCount > 1 ? webfluxHandler(args.namedChild(1), source) : null,
+      handler: args.namedChildCount > 1 ? functionalHandler(args.namedChild(1), source) : null,
       scope: "file",                                   // not attached to a handler method
       text: slice(source, node),
       startLine: node.startPosition.row + 1,
@@ -491,8 +521,8 @@ function extractRoutes(filePath, source, tree) {
     routes.push(...methodRoutes(node, base, source, composed));
   });
 
-  // Functional WebFlux routes (call-based), only when the file uses the API.
-  if (importsWebfluxFunctional(tree, source)) {
+  // Functional routes (call-based), only when the file uses the API.
+  if (importsFunctionalRouting(tree, source)) {
     routes.push(...functionalRoutes(tree, source));
   }
 
